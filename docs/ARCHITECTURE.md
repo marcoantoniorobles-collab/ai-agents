@@ -116,6 +116,20 @@ si la máquina está apagada a la hora programada, la tarea se dispara
 automáticamente apenas se prende de nuevo. `cron` simple no tiene esa
 recuperación.
 
+## Timeout de RQ: siempre explícito, nunca el default
+
+El default de RQ (`job_timeout`) es 180 segundos — mata el proceso a la
+fuerza si se excede, sin darle chance al código a actualizar el estado en
+Postgres (la tarea queda atascada en `RUNNING` para siempre). Cualquier
+tarea que pueda tardar más que unos segundos (scrapers multi-página,
+cualquier cosa con delays humanizados) DEBE encolarse con un
+`job_timeout` explícito y generoso. En esta plataforma se usa un valor
+único de **3600 segundos (1 hora)** para todo, tanto en el encolado
+inicial (`services/api/app/queue.py`) como en el re-encolado de
+reintentos (`jobs.py` de cada tipo de agente/worker) — más simple que
+tener un valor por `task_type`, y ninguna tarea actual necesita más de
+una hora.
+
 ## Claves únicas de negocio: verificar contra datos reales, no asumir
 
 Al diseñar la tabla `servir_ofertas` se asumió que (`numero_convocatoria`,

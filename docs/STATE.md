@@ -71,8 +71,34 @@ consultar `GET /agents` o el dashboard para verlos).
 
 ## Próximos pasos pendientes (al momento de este snapshot)
 
-- [ ] Confirmar la primera corrida real de `servir_daily_sync` sin límite de páginas (338 páginas completas).
-- [ ] Instalar el timer systemd (`infra/systemd/`) para que quede corriendo solo a diario.
-- [ ] Commitear y subir a GitHub los cambios pendientes: fix de clave única, dashboard, panel VNC embebido.
+- [ ] Confirmar que la corrida real completa de `servir_daily_sync` (338 páginas) terminó bien — lanzada, en curso al momento de este snapshot.
+- [ ] Instalar el timer systemd (`infra/systemd/`) para que quede corriendo solo a diario — todavía no instalado.
 - [ ] (Futuro) Definir el segundo agente/proyecto.
+
+## Fix importante: timeout de RQ (job_timeout)
+
+RQ mata una tarea a la fuerza si supera 180 segundos por defecto (sin
+avisar de forma recuperable — mata el proceso worker completo, dejando la
+tarea en Postgres atascada en `RUNNING` para siempre, sin actualizar su
+estado). Esto rompió el primer intento de corrida real de SERVIR (338
+páginas, ~20-30 min de duración esperada).
+
+**Fix aplicado:** `job_timeout=3600` (1 hora) en TODOS los `enqueue()` /
+`enqueue_in()` de la plataforma — tanto en `services/api/app/queue.py`
+(encolado inicial) como en `services/browser-agent/agent_runtime/jobs.py`
+(re-encolado de reintentos). Ver `docs/ARCHITECTURE.md` para el detalle.
+
+**Si una tarea real queda atascada en `RUNNING` para siempre** (por este
+u otro motivo antes de este fix): arreglar a mano en Postgres:
+```sql
+UPDATE tasks SET status='DEAD', error_message='...', completed_at=now()
+WHERE id='<uuid de la tarea>';
+```
+
+## Cómo retomar este proyecto sin el historial del chat
+
+1. Leer, en orden: `README.md` → `docs/ARCHITECTURE.md` → `docs/STATE.md` (este archivo) → `docs/AGENT_PROTOCOL.md`.
+2. El código real vive en `~/ai-agents/` dentro del servidor Ubuntu, y en `https://github.com/marcoantoniorobles-collab/ai-agents` (privado).
+3. Para ver el estado en vivo: `http://<TAILSCALE_IP>:8000/dashboard` (necesita estar conectado al mismo tailnet).
+4. `git log --oneline` en `~/ai-agents/` muestra el historial real de cambios aplicados.
 
