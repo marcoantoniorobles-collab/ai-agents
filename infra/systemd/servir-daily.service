@@ -1,0 +1,7 @@
+[Unit]
+Description=Disparar sincronización diaria de ofertas SERVIR
+
+[Service]
+Type=oneshot
+User=aiadmin
+ExecStart=/home/aiadmin/ai-agents/servir_daily_trigger.sh

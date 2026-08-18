@@ -1,0 +1,134 @@
+services:
+  api:
+    build: ./services/api
+    container_name: ai-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_HOST: postgres
+      REDIS_HOST: redis
+    ports:
+      - "${TAILSCALE_IP}:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ai-network
+    mem_limit: 512m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  worker:
+    build: ./services/worker
+    container_name: ai-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_HOST: postgres
+      REDIS_HOST: redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ai-network
+    mem_limit: 512m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  agent-1:
+    build: ./services/browser-agent
+    container_name: ai-agent-1
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_HOST: postgres
+      REDIS_HOST: redis
+      AGENT_NAME: agent-1
+      ENABLE_VNC: "true"
+    shm_size: "1gb"
+    ports:
+      - "${TAILSCALE_IP}:6080:6080"
+    volumes:
+      - /mnt/hgfs/AI-Agents/salidas/agente-1:/app/output
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ai-network
+    mem_limit: 2g
+    cpus: 1.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  agent-2:
+    build: ./services/browser-agent
+    container_name: ai-agent-2
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_HOST: postgres
+      REDIS_HOST: redis
+      AGENT_NAME: agent-2
+      ENABLE_VNC: "false"
+    shm_size: "1gb"
+    volumes:
+      - /mnt/hgfs/AI-Agents/salidas/agente-2:/app/output
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ai-network
+    mem_limit: 1.5g
+    cpus: 1.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  agent-3:
+    build: ./services/browser-agent
+    container_name: ai-agent-3
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_HOST: postgres
+      REDIS_HOST: redis
+      AGENT_NAME: agent-3
+      ENABLE_VNC: "false"
+    shm_size: "1gb"
+    volumes:
+      - /mnt/hgfs/AI-Agents/salidas/agente-3:/app/output
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ai-network
+    mem_limit: 1.5g
+    cpus: 1.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

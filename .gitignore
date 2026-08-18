@@ -1,0 +1,24 @@
+# Secretos y configuración local — nunca se sube
+.env
+
+# Datos vivos de las bases de datos (no son código, son datos)
+postgres/data/
+redis/data/
+
+# Salidas generadas por los agentes (excels, capturas, html volcado)
+salidas/
+services/browser-agent/agent_runtime/**/output/
+*.xlsx
+*.png
+servir_pagina.html
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Archivos temporales de la reorganización
+_archivo_viejo/
+
+# Logs
+*.log

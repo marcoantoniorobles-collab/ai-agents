@@ -1,0 +1,9 @@
+[Unit]
+Description=Timer diario para sincronización de ofertas SERVIR
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
