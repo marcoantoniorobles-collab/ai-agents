@@ -126,7 +126,10 @@ def _handle_failure(db, task: Task, attempt_number: int, started_at: datetime, e
     db.commit()
 
     delay = _backoff_seconds(task.retry_count)
-    _retry_queue.enqueue_in(timedelta(seconds=delay), "agent_runtime.jobs.run_task", str(task.id))
+    _retry_queue.enqueue_in(
+        timedelta(seconds=delay), "agent_runtime.jobs.run_task", str(task.id),
+        job_timeout=3600,
+    )
     logger.warning(
         "Tarea %s falló (intento %s/%s, task_type=%s), reintenta en %ss: %s",
         task.id, task.retry_count, task.max_retries, task.task_type, delay, error_text,
