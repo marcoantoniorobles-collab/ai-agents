@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>AI Agents — Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --navy: #1F3864;
+    --gold: #C9A227;
+    --bg: #F4F5F7;
+    --card: #FFFFFF;
+    --text: #222;
+    --muted: #6b7280;
+    --ok: #1a7f37;
+    --warn: #b45309;
+    --err: #b91c1c;
+    --border: #e5e7eb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    background: var(--navy);
+    color: white;
+    padding: 18px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header .status-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--ok);
+    margin-right: 6px;
+  }
+  header .meta { font-size: 12px; color: #cbd5e1; }
+  main { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
+  section { margin-bottom: 28px; }
+  section h2 {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .grid-agents {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .agent-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--muted);
+    border-radius: 8px;
+    padding: 16px 18px;
+    transition: border-color 0.3s;
+  }
+  .agent-card.status-ONLINE { border-left-color: var(--ok); }
+  .agent-card.status-OFFLINE { border-left-color: var(--err); }
+  .agent-card.status-BUSY { border-left-color: var(--warn); }
+  .agent-card .top-row { display: flex; justify-content: space-between; align-items: flex-start; }
+  .agent-card .name { font-weight: 700; font-size: 17px; }
+  .agent-card .id { font-size: 10px; color: var(--muted); font-family: monospace; margin-top: 2px; }
+  .agent-card .current-task {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    background: #f8fafc;
+  }
+  .agent-card .current-task.working { background: #eff6ff; color: #1d4ed8; font-weight: 600; }
+  .agent-card .current-task.idle { color: var(--muted); }
+  .agent-card .current-task .sub { font-size: 11px; font-weight: 400; color: var(--muted); margin-top: 2px; }
+  .vnc-toggle-btn {
+    margin-top: 10px;
+    width: 100%;
+    padding: 8px;
+    border: 1px solid var(--navy);
+    background: white;
+    color: var(--navy);
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .vnc-toggle-btn:hover { background: var(--navy); color: white; }
+
+  .vnc-panel {
+    display: none;
+    position: fixed;
+    top: 0; right: 0; bottom: 0;
+    width: min(560px, 90vw);
+    background: #111;
+    box-shadow: -4px 0 20px rgba(0,0,0,0.3);
+    z-index: 100;
+    flex-direction: column;
+  }
+  .vnc-panel.open { display: flex; }
+  .vnc-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: var(--navy);
+    color: white;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .vnc-panel-header button {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 18px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .vnc-panel iframe { flex: 1; width: 100%; border: none; }
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin-top: 8px;
+  }
+  .badge.ONLINE { background: #dcfce7; color: var(--ok); }
+  .badge.BUSY { background: #fef3c7; color: var(--warn); }
+  .badge.OFFLINE { background: #fee2e2; color: var(--err); }
+  .agent-card .heartbeat { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 8px; overflow: hidden; }
+  table th, table td {
+    text-align: left;
+    padding: 10px 12px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+  }
+  table th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  table tr:last-child td { border-bottom: none; }
+  .badge.COMPLETED { background: #dcfce7; color: var(--ok); }
+  .badge.RUNNING { background: #dbeafe; color: #1d4ed8; }
+  .badge.QUEUED, .badge.PENDING { background: #f3f4f6; color: var(--muted); }
+  .badge.FAILED { background: #fef3c7; color: var(--warn); }
+  .badge.DEAD { background: #fee2e2; color: var(--err); }
+
+  .error-cell { color: var(--err); font-size: 12px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
+  .filters { margin-bottom: 10px; font-size: 13px; }
+  .filters select { padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border); }
+  .empty { color: var(--muted); font-size: 13px; padding: 16px; text-align: center; }
+  footer { text-align: center; font-size: 11px; color: var(--muted); padding: 20px; }
+  .info-box {
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-size: 13px;
+    color: #78350f;
+    margin-bottom: 20px;
+  }
+  .info-box code {
+    background: #fff;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🤖 AI Agents — Panel de control</h1>
+  <div class="meta"><span class="status-dot"></span><span id="last-update">actualizando...</span></div>
+</header>
+
+<main>
+  <div class="info-box">
+    Este panel es de solo lectura: muestra el estado real de tus agentes y tareas.
+    Para lanzar una tarea nueva, se usa la API: <code>POST /tasks</code> con
+    <code>task_type</code> y <code>agent_id</code> — por ejemplo desde la terminal
+    con <code>curl</code>, o desde un script/timer programado.
+  </div>
+
+  <section>
+    <h2>Agentes</h2>
+    <div id="agents-grid" class="grid-agents"><div class="empty">Cargando...</div></div>
+  </section>
+
+  <section>
+    <h2>Tareas recientes</h2>
+    <div class="filters">
+      Filtrar por estado:
+      <select id="status-filter">
+        <option value="">Todos</option>
+        <option value="RUNNING">RUNNING</option>
+        <option value="QUEUED">QUEUED</option>
+        <option value="COMPLETED">COMPLETED</option>
+        <option value="FAILED">FAILED</option>
+        <option value="DEAD">DEAD</option>
+      </select>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Tipo</th>
+          <th>Agente</th>
+          <th>Estado</th>
+          <th>Creada</th>
+          <th>Duración</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody id="tasks-body">
+        <tr><td colspan="6" class="empty">Cargando...</td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+
+<footer>Se actualiza cada 4 segundos · datos desde /agents y /tasks</footer>
+
+<div class="vnc-panel" id="vnc-panel">
+  <div class="vnc-panel-header">
+    <span id="vnc-panel-title">Pantalla en vivo</span>
+    <button onclick="closeVncPanel()">✕</button>
+  </div>
+  <iframe id="vnc-panel-frame" src=""></iframe>
+</div>
+
+<script>
+const API_BASE = "";  // mismo origen (la API sirve este dashboard)
+let agentNameById = {};
+let latestTasks = [];
+
+function timeAgo(iso) {
+  if (!iso) return "—";
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return Math.floor(diff) + "s";
+  if (diff < 3600) return Math.floor(diff / 60) + "m";
+  if (diff < 86400) return Math.floor(diff / 3600) + "h";
+  return Math.floor(diff / 86400) + "d";
+}
+
+function duration(startIso, endIso) {
+  if (!startIso) return "—";
+  const end = endIso ? new Date(endIso).getTime() : Date.now();
+  const secs = Math.floor((end - new Date(startIso).getTime()) / 1000);
+  if (secs < 60) return secs + "s";
+  const mins = Math.floor(secs / 60);
+  const remSecs = secs % 60;
+  if (mins < 60) return mins + "m " + remSecs + "s";
+  const hrs = Math.floor(mins / 60);
+  return hrs + "h " + (mins % 60) + "m";
+}
+
+function currentTaskHtml(agentId) {
+  const running = latestTasks.find(t => t.agent_id === agentId && t.status === "RUNNING");
+  if (running) {
+    return `
+      <div class="current-task working">
+        🔵 Trabajando en: ${running.task_type}
+        <div class="sub">desde hace ${duration(running.started_at)}</div>
+      </div>`;
+  }
+  const lastForAgent = latestTasks.find(t => t.agent_id === agentId);
+  if (lastForAgent) {
+    return `
+      <div class="current-task idle">
+        ⚪ Inactivo
+        <div class="sub">última tarea: ${lastForAgent.task_type} (${lastForAgent.status.toLowerCase()}, hace ${timeAgo(lastForAgent.updated_at)})</div>
+      </div>`;
+  }
+  return `<div class="current-task idle">⚪ Sin tareas todavía</div>`;
+}
+
+function vncSectionHtml(agent) {
+  if (!agent.metadata || !agent.metadata.vnc_enabled) return "";
+  return `
+    <button class="vnc-toggle-btn" onclick="openVncPanel('${agent.id}', '${agent.name}')">
+      👁️ Ver pantalla en vivo
+    </button>
+  `;
+}
+
+function openVncPanel(agentId, agentName) {
+  const panel = document.getElementById("vnc-panel");
+  const frame = document.getElementById("vnc-panel-frame");
+  const title = document.getElementById("vnc-panel-title");
+  const vncUrl = `${window.location.protocol}//${window.location.hostname}:6080/vnc.html?autoconnect=true&resize=remote&reconnect=true`;
+  title.textContent = "Pantalla en vivo — " + agentName;
+  frame.src = vncUrl;
+  panel.classList.add("open");
+}
+
+function closeVncPanel() {
+  document.getElementById("vnc-panel").classList.remove("open");
+  document.getElementById("vnc-panel-frame").src = "";  // corta la conexión al cerrar
+}
+
+function renderAgents(agents) {
+  const grid = document.getElementById("agents-grid");
+  if (agents.length === 0) {
+    grid.innerHTML = '<div class="empty">No hay agentes registrados</div>';
+    return;
+  }
+  grid.innerHTML = agents.map(a => `
+    <div class="agent-card status-${a.status}">
+      <div class="top-row">
+        <div>
+          <div class="name">${a.name}</div>
+          <div class="id">${a.id}</div>
+        </div>
+        <span class="badge ${a.status}">${a.status}</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:8px;">último heartbeat: hace ${timeAgo(a.last_heartbeat)}</div>
+      ${currentTaskHtml(a.id)}
+      ${vncSectionHtml(a)}
+    </div>
+  `).join("");
+}
+
+async function fetchAgents() {
+  const res = await fetch(API_BASE + "/agents");
+  const agents = await res.json();
+  agentNameById = {};
+  agents.forEach(a => agentNameById[a.id] = a.name);
+  return agents;
+}
+
+async function fetchTasks() {
+  const filter = document.getElementById("status-filter").value;
+  const url = API_BASE + "/tasks?limit=50" + (filter ? "&status=" + filter : "");
+  const res = await fetch(url);
+  return await res.json();
+}
+
+function renderTasksTable(tasks) {
+  const tbody = document.getElementById("tasks-body");
+  if (tasks.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">No hay tareas</td></tr>';
+    return;
+  }
+  tbody.innerHTML = tasks.map(t => {
+    const agentName = t.agent_id ? (agentNameById[t.agent_id] || t.agent_id.slice(0, 8)) : "—";
+    const dur = t.started_at ? duration(t.started_at, t.completed_at) : "—";
+    const errorCell = t.error_message
+      ? `<span class="error-cell" title="${t.error_message.replace(/"/g, '&quot;')}">${t.error_message}</span>`
+      : "—";
+    return `
+      <tr>
+        <td>${t.task_type}</td>
+        <td>${agentName}</td>
+        <td><span class="badge ${t.status}">${t.status}</span></td>
+        <td>hace ${timeAgo(t.created_at)}</td>
+        <td>${dur}</td>
+        <td>${errorCell}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+async function refresh() {
+  try {
+    const agents = await fetchAgents();
+    latestTasks = await fetchTasks();
+    renderAgents(agents);
+    renderTasksTable(latestTasks);
+    document.getElementById("last-update").textContent =
+      "actualizado " + new Date().toLocaleTimeString("es-PE");
+  } catch (e) {
+    document.getElementById("last-update").textContent = "error actualizando: " + e.message;
+  }
+}
+
+document.getElementById("status-filter").addEventListener("change", refresh);
+refresh();
+setInterval(refresh, 4000);
+</script>
+
+</body>
+</html>

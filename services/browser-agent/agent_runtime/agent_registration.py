@@ -29,15 +29,17 @@ def upsert_agent(name: str) -> Agent:
     try:
         agent = db.scalar(select(Agent).where(Agent.name == name))
         now = datetime.now(timezone.utc)
+        metadata = {"runtime": "playwright", "vnc_enabled": settings.enable_vnc}
         if agent:
             agent.status = "ONLINE"
             agent.last_heartbeat = now
+            agent.metadata_ = metadata  # refleja el ENABLE_VNC actual, por si cambió
         else:
             agent = Agent(
                 name=name,
                 status="ONLINE",
                 last_heartbeat=now,
-                metadata_={"runtime": "playwright"},
+                metadata_=metadata,
             )
             db.add(agent)
         db.commit()

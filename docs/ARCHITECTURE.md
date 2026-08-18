@@ -116,6 +116,19 @@ si la máquina está apagada a la hora programada, la tarea se dispara
 automáticamente apenas se prende de nuevo. `cron` simple no tiene esa
 recuperación.
 
+## Claves únicas de negocio: verificar contra datos reales, no asumir
+
+Al diseñar la tabla `servir_ofertas` se asumió que (`numero_convocatoria`,
+`entidad`) identificaba una oferta de forma única. Falso: una misma
+entidad puede repetir el mismo número de convocatoria para varios puestos
+distintos dentro de una convocatoria transitoria (ej. "1 chofer / 1
+secretaria" bajo el mismo número). Se corrigió agregando `titulo` a la
+clave. **Lección para proyectos futuros:** antes de fijar una clave única
+de negocio, probarla contra una muestra real de datos (no asumir desde la
+documentación de la página), y diseñar el upsert con commit por fila
+individual (no un solo commit al final del lote) para que un choque de
+clave puntual no aborte todo el progreso ya guardado.
+
 ## Reintentos y resiliencia en tareas largas (scrapers multi-página)
 
 Un scraper que recorre cientos de páginas NO debe abortar todo el progreso
@@ -135,3 +148,26 @@ Se reevalúa si el volumen de agentes lo justifica más adelante.
 ## Reverse proxy
 
 Descartado (Nginx/Traefik/Caddy) — resuelto con Tailscale, no hace falta.
+
+## Dashboard: HTML/JS autocontenido servido por la misma API
+
+Sin build, sin framework, sin contenedor nuevo. Un solo archivo
+(`services/api/app/static/dashboard.html`) que hace `fetch()` periódico a
+`/agents` y `/tasks` (ya existentes) y renderiza el estado. Servido por una
+ruta más de la API (`GET /dashboard`), reutilizando la misma seguridad de
+red que ya existe (Tailscale) — sin login propio, porque la red ya es el
+control de acceso.
+
+**Por qué no un frontend con build (React, etc.):** para esta escala,
+agregar un pipeline de build (npm, bundler) es sobre-ingeniería. Un archivo
+HTML con JS vanilla que hace polling cada 4 segundos cubre la necesidad
+completa (ver estado de agentes y tareas en vivo) sin esa complejidad. Se
+reevalúa si el dashboard crece mucho en funcionalidad.
+
+**Ver pantalla en vivo embebida:** el dashboard puede embeber el noVNC de
+un agente en un panel lateral (iframe), en vez de mandar a la persona a
+otra pestaña. Esto se ofrece solo para agentes con
+`metadata.vnc_enabled=true` (cada agente setea ese flag en su propia fila
+de `agents` al registrarse, según su propio `ENABLE_VNC`). El iframe vive
+en un contenedor separado de la grilla de agentes que se refresca cada 4s,
+para no reconectar el VNC en cada ciclo de refresh.

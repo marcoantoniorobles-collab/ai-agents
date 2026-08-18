@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------- Agents ----------
@@ -13,7 +13,7 @@ class AgentRegister(BaseModel):
 
 
 class AgentOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: uuid.UUID
     name: str
@@ -21,6 +21,10 @@ class AgentOut(BaseModel):
     last_heartbeat: datetime | None
     created_at: datetime
     updated_at: datetime
+    # El atributo real en el modelo SQLAlchemy es "metadata_" (con guión
+    # bajo, porque "metadata" está reservado por SQLAlchemy). Acá se
+    # renombra para que la API lo devuelva como "metadata" normal.
+    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
 
 
 # ---------- Tasks ----------

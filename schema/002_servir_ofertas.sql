@@ -19,7 +19,7 @@ CREATE TABLE servir_ofertas (
     removed_by_user     BOOLEAN NOT NULL DEFAULT false,
     removed_by_user_at  TIMESTAMPTZ,
 
-    UNIQUE (numero_convocatoria, entidad)
+    UNIQUE (numero_convocatoria, entidad, titulo)
 );
 
 CREATE INDEX idx_servir_ofertas_removed ON servir_ofertas (removed_by_user);
