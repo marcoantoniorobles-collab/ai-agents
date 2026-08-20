@@ -113,19 +113,17 @@ MARK_VALUES        = {"X", "SI", "SÍ", "YES", "1", "S"}
 EXCEL_HEADERS = [
     "Título de Convocatoria",    # col  1
     "Entidad",                   # col  2
-    None,                        # col  3  (espaciador)
-    None,                        # col  4  (espaciador)
-    "Ubicación",                 # col  5
-    "Número de Convocatoria",    # col  6
-    "Vacantes",                  # col  7  → int
-    "Remuneración",              # col  8  → float "#,##0.00"
-    "Fecha Inicio Publicación",  # col  9  → date  "DD/MM/YYYY"
-    "Fecha Fin Publicación",     # col 10  → date  "DD/MM/YYYY"
-    "Requerimiento",             # col 11  → texto (detalle)
-    "Experiencia",               # col 12  → texto (detalle)
-    "Formación Académica",       # col 13  → texto (detalle)
-    "Especialización",           # col 14  → texto (detalle)
-    MARK_COLUMN_HEADER,          # col 15  → marcado manual
+    "Ubicación",                 # col  3
+    "Número de Convocatoria",    # col  4
+    "Vacantes",                  # col  5  → int
+    "Remuneración",              # col  6  → float "#,##0.00"
+    "Fecha Inicio Publicación",  # col  7  → date  "DD/MM/YYYY"
+    "Fecha Fin Publicación",     # col  8  → date  "DD/MM/YYYY"
+    "Requerimiento",             # col  9  → texto (detalle)
+    "Experiencia",               # col 10  → texto (detalle)
+    "Formación Académica",       # col 11  → texto (detalle)
+    "Especialización",           # col 12  → texto (detalle)
+    MARK_COLUMN_HEADER,          # col 13  → marcado manual
 ]
 
 # ---------------------------------------------------------------------------
@@ -405,10 +403,10 @@ ROW_FILL_ALT = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="
 CENTER       = Alignment(horizontal="center", vertical="center", wrap_text=True)
 LEFT         = Alignment(horizontal="left",   vertical="center", wrap_text=True)
 
-COLUMN_WIDTHS = [45, 38, 4, 4, 26, 24, 10, 16, 16, 16, 50, 50, 50, 50, 16]
+COLUMN_WIDTHS = [45, 38, 26, 24, 10, 16, 16, 16, 50, 50, 50, 50, 16]
 
 
-def _write_excel_formatted(rows: list[dict], output_path: str) -> None:
+def _write_excel_formatted(rows: list[dict], output_path: str, dup_rows: list[dict] | None = None) -> None:
     """Escribe Excel con tipos correctos: int, float, date y texto."""
     wb = Workbook()
     ws = wb.active
@@ -439,24 +437,59 @@ def _write_excel_formatted(rows: list[dict], output_path: str) -> None:
 
         _put(1,  row.get("titulo",              ""))
         _put(2,  row.get("entidad",             ""))
-        _put(3,  None)
-        _put(4,  None)
-        _put(5,  row.get("ubicacion",           ""))
-        _put(6,  row.get("numero_convocatoria", ""), align=CENTER)
-        _put(7,  _parse_vacantes(row.get("vacantes",      "")))
-        _put(8,  _parse_remuneracion(row.get("remuneracion", "")), CURR_FMT, CENTER)
-        _put(9,  _parse_fecha(row.get("fecha_inicio", "")),        DATE_FMT, CENTER)
-        _put(10, _parse_fecha(row.get("fecha_fin",    "")),        DATE_FMT, CENTER)
-        _put(11, row.get("requerimiento",       ""))
-        _put(12, row.get("experiencia",         ""))
-        _put(13, row.get("formacion_academica", ""))
-        _put(14, row.get("especializacion",     ""))
-        _put(15, None)
+        _put(3,  row.get("ubicacion",           ""))
+        _put(4,  row.get("numero_convocatoria", ""), align=CENTER)
+        _put(5,  _parse_vacantes(row.get("vacantes",      "")))
+        _put(6,  _parse_remuneracion(row.get("remuneracion", "")), CURR_FMT, CENTER)
+        _put(7,  _parse_fecha(row.get("fecha_inicio", "")),        DATE_FMT, CENTER)
+        _put(8,  _parse_fecha(row.get("fecha_fin",    "")),        DATE_FMT, CENTER)
+        _put(9,  row.get("requerimiento",       ""))
+        _put(10, row.get("experiencia",         ""))
+        _put(11, row.get("formacion_academica", ""))
+        _put(12, row.get("especializacion",     ""))
+        _put(13, None)
 
     # Anchos
     for col_idx, width in enumerate(COLUMN_WIDTHS, start=1):
         ws.column_dimensions[get_column_letter(col_idx)].width = width
 
+    # ── Hoja Duplicados ─────────────────────────────────────────────────
+    if dup_rows:
+        ws_dup = wb.create_sheet(title="Duplicados")
+        ws_dup.append([h or "" for h in EXCEL_HEADERS])
+        DUP_FILL = PatternFill(start_color="8B0000", end_color="8B0000", fill_type="solid")
+        for col_idx in range(1, len(EXCEL_HEADERS) + 1):
+            cell = ws_dup.cell(row=1, column=col_idx)
+            cell.fill = DUP_FILL
+            cell.font = Font(color="FFFFFF", bold=True)
+            cell.alignment = CENTER
+        ws_dup.row_dimensions[1].height = 30
+        ws_dup.freeze_panes = "A2"
+        for row_num_d, row_d in enumerate(dup_rows, start=2):
+            alt_d = (row_num_d % 2 == 0)
+            def _put_d(col, value, fmt=None, align=LEFT, _rn=row_num_d, _alt=alt_d):
+                c = ws_dup.cell(row=_rn, column=col, value=value)
+                if _alt:
+                    c.fill = ROW_FILL_ALT
+                c.alignment = align
+                if fmt:
+                    c.number_format = fmt
+                return c
+            _put_d(1,  row_d.get("titulo",              ""))
+            _put_d(2,  row_d.get("entidad",             ""))
+            _put_d(3,  row_d.get("ubicacion",           ""))
+            _put_d(4,  row_d.get("numero_convocatoria", ""), align=CENTER)
+            _put_d(5,  _parse_vacantes(row_d.get("vacantes",      "")))
+            _put_d(6,  _parse_remuneracion(row_d.get("remuneracion", "")), CURR_FMT, CENTER)
+            _put_d(7,  _parse_fecha(row_d.get("fecha_inicio", "")),        DATE_FMT, CENTER)
+            _put_d(8,  _parse_fecha(row_d.get("fecha_fin",    "")),        DATE_FMT, CENTER)
+            _put_d(9,  row_d.get("requerimiento",       ""))
+            _put_d(10, row_d.get("experiencia",         ""))
+            _put_d(11, row_d.get("formacion_academica", ""))
+            _put_d(12, row_d.get("especializacion",     ""))
+            _put_d(13, None)
+        for col_idx, width in enumerate(COLUMN_WIDTHS, start=1):
+            ws_dup.column_dimensions[get_column_letter(col_idx)].width = width
     wb.save(output_path)
     logger.info("Excel guardado: %s (%d filas)", output_path, len(rows))
 
@@ -472,7 +505,6 @@ def _write_excel(rows: list[dict], output_path: str) -> None:
         ws.append([
             row.get("titulo",              ""),
             row.get("entidad",             ""),
-            None, None,
             row.get("ubicacion",           ""),
             row.get("numero_convocatoria", ""),
             _parse_vacantes(row.get("vacantes",      "")),
@@ -486,7 +518,7 @@ def _write_excel(rows: list[dict], output_path: str) -> None:
             None,
         ])
 
-    for row_cells in ws.iter_rows(min_row=2, min_col=8, max_col=10):
+    for row_cells in ws.iter_rows(min_row=2, min_col=6, max_col=8):
         row_cells[0].number_format = CURR_FMT
         row_cells[1].number_format = DATE_FMT
         row_cells[2].number_format = DATE_FMT
@@ -748,7 +780,23 @@ def sync_servir_daily(payload: dict[str, Any], browser: BrowserManager) -> dict[
     finally:
         db.close()
 
-    _write_excel_formatted(final_rows, output_path)
+    # Calcular duplicados: rows de all_rows con misma (numero, entidad, titulo)
+    from collections import Counter as _Ctr
+    _dup_cnt = _Ctr(
+        (r.get("numero_convocatoria","").strip(),
+         r.get("entidad","").strip(),
+         r.get("titulo","").strip())
+        for r in all_rows
+    )
+    _dup_rows = [
+        r for r in all_rows
+        if _dup_cnt[(
+            r.get("numero_convocatoria","").strip(),
+            r.get("entidad","").strip(),
+            r.get("titulo","").strip()
+        )] > 1
+    ]
+    _write_excel_formatted(final_rows, output_path, dup_rows=_dup_rows or None)
 
     result = {
         "output_file":             output_filename,
