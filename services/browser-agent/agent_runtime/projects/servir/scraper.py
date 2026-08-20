@@ -662,7 +662,7 @@ def sync_servir_daily(payload: dict[str, Any], browser: BrowserManager) -> dict[
     finally:
         page.close()
 
-    recorrido_completo = not stopped_early and not failed_pages
+    recorrido_completo = not stopped_early and not failed_pages and pages_scraped >= total_pages
 
     # Persistir en BD
     db = SessionLocal()
@@ -903,7 +903,7 @@ def scrape_servir_ofertas(payload: dict[str, Any], browser: BrowserManager) -> d
         "total_ofertas":         len(all_rows),
         "paginas_recorridas":    pages_scraped,
         "paginas_fallidas":      failed_pages,
-        "recorrido_completo":    not stopped_early and not failed_pages,
+        "recorrido_completo":    not stopped_early and not failed_pages and pages_scraped >= total_pages,
         "detalle_error":         error_detail,
     }
     logger.info("SERVIR: recorrido finalizado — %s", result)
