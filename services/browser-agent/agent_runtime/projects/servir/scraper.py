@@ -52,7 +52,7 @@ from sqlalchemy import select
 
 from ...browser_manager import BrowserManager
 from ...database import SessionLocal
-from ...models import ServirOferta
+from .models import ServirOferta
 
 logger = logging.getLogger("agent_runtime.scrapers.servir")
 
