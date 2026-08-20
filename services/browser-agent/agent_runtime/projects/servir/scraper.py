@@ -18,19 +18,17 @@ Mapa de columnas Excel
 ======================
 Col  1 → Título de Convocatoria
 Col  2 → Entidad
-Col  3 → (espaciador)
-Col  4 → (espaciador)
-Col  5 → Ubicación
-Col  6 → Número de Convocatoria
-Col  7 → Vacantes            (int)
-Col  8 → Remuneración        (float, #,##0.00)
-Col  9 → Fecha Inicio        (date, DD/MM/YYYY)
-Col 10 → Fecha Fin           (date, DD/MM/YYYY)
-Col 11 → Requerimiento       (texto — sólo si get_detail=True)
-Col 12 → Experiencia         (texto — sólo si get_detail=True)
-Col 13 → Formación Académica (texto — sólo si get_detail=True)
-Col 14 → Especialización     (texto — sólo si get_detail=True)
-Col 15 → No me interesa      (marcado manual)
+Col  3 → Ubicación
+Col  4 → Número de Convocatoria
+Col  5 → Vacantes            (int)
+Col  6 → Remuneración        (float, #,##0.00)
+Col  7 → Fecha Inicio        (date, DD/MM/YYYY)
+Col  8 → Fecha Fin           (date, DD/MM/YYYY)
+Col  9 → Requerimiento       (texto — sólo si get_detail=True)
+Col 10 → Experiencia         (texto — sólo si get_detail=True)
+Col 11 → Formación Académica (texto — sólo si get_detail=True)
+Col 12 → Especialización     (texto — sólo si get_detail=True)
+Col 13 → No me interesa      (marcado manual)
 
 IMPORTANTE sobre los links de convocatoria
 ==========================================
@@ -360,8 +358,13 @@ def _extract_detail_page(page, context, card_index: int) -> dict:
     """
     Hace clic en '¡Ver más!' de la tarjeta `card_index` (base-0).
     Extrae aviso_num, requerimiento, experiencia, formacion_academica,
-    especializacion. Vuelve al listado. Devuelve dict con valores vacíos si falla.
+    especializacion. Vuelve al listado navegando a DEFAULT_URL (no go_back),
+    para obtener un ViewState JSF fresco y evitar corromper el estado del paginador.
+    Devuelve dict con valores vacíos si falla.
     """
+    navigated = False
+    detail     = _empty_detail()
+
     try:
         cards = page.locator(CARDS_SELECTOR).all()
         if card_index >= len(cards):
@@ -375,18 +378,25 @@ def _extract_detail_page(page, context, card_index: int) -> dict:
         ):
             ver_mas.click()
 
+        navigated = True
         page.wait_for_load_state("networkidle", timeout=20_000)
-        detail: dict = page.evaluate(EXTRACT_DETAIL_JS)
+        detail = page.evaluate(EXTRACT_DETAIL_JS)
 
     except Exception as exc:
         logger.warning("Error al abrir detalle (tarjeta %d): %s", card_index, exc)
-        detail = _empty_detail()
 
-    try:
-        page.go_back(wait_until="networkidle", timeout=30_000)
-        page.wait_for_timeout(1_000)
-    except Exception as exc:
-        logger.warning("Error al volver del detalle (tarjeta %d): %s", card_index, exc)
+    if navigated:
+        try:
+            # Navegar a DEFAULT_URL en lugar de go_back() para obtener un
+            # ViewState JSF fresco. El servidor mantiene la posición de página
+            # en la sesión HTTP, por lo que debería retornar a la misma página.
+            page.goto(DEFAULT_URL, wait_until="networkidle", timeout=30_000)
+            # Esperar que PrimeFaces inicialice los botones "Ver más"
+            # antes de intentar el siguiente click.
+            page.wait_for_selector(VER_MAS_SELECTOR, state="visible", timeout=15_000)
+            page.wait_for_timeout(1_000)
+        except Exception as exc:
+            logger.warning("Error al restaurar listado tras detalle (tarjeta %d): %s", card_index, exc)
 
     return detail
 
@@ -492,6 +502,163 @@ def _write_excel_formatted(rows: list[dict], output_path: str, dup_rows: list[di
             ws_dup.column_dimensions[get_column_letter(col_idx)].width = width
     wb.save(output_path)
     logger.info("Excel guardado: %s (%d filas)", output_path, len(rows))
+
+
+def _upsert_excel(
+    scraped_rows: list[dict],
+    output_path: str,
+    dup_rows: list[dict] | None = None,
+) -> tuple[int, int]:
+    """
+    Agrega al Excel existente únicamente las filas cuyo numero_convocatoria
+    no está todavía en la hoja correspondiente.
+
+    - Si el archivo no existe → lo crea desde cero con todos los scraped_rows.
+    - Si el archivo existe    → lee los numero_convocatoria presentes, solo
+                                 agrega los que son genuinamente nuevos.
+    - Las marcas del usuario (col 13) en el archivo existente se conservan.
+    - Misma lógica para la hoja Duplicados.
+
+    Retorna (nuevas_main, nuevas_dup).
+    """
+    NUM_COL_IDX = 4   # col 4 = Número de Convocatoria (base-1, índice base-0 = 3)
+
+    existing_main_nums: set[str] = set()
+    existing_dup_nums:  set[str] = set()
+    wb_exists = os.path.exists(output_path)
+    wb = None
+
+    if wb_exists:
+        try:
+            wb = load_workbook(output_path)
+        except Exception as exc:
+            logger.warning(
+                "No se pudo cargar el Excel existente (%s); se recreará desde cero.", exc
+            )
+            wb_exists = False
+
+    if wb_exists and wb is not None:
+        ws_main = wb.active
+        for xrow in ws_main.iter_rows(min_row=2, values_only=True):
+            num = str(xrow[NUM_COL_IDX - 1] or "").strip()
+            if num:
+                existing_main_nums.add(num)
+
+        ws_dup = wb["Duplicados"] if "Duplicados" in wb.sheetnames else None
+        if ws_dup is not None:
+            for xrow in ws_dup.iter_rows(min_row=2, values_only=True):
+                num = str(xrow[NUM_COL_IDX - 1] or "").strip()
+                if num:
+                    existing_dup_nums.add(num)
+    else:
+        # Crear libro nuevo con cabecera
+        wb = Workbook()
+        ws_main = wb.active
+        ws_main.title = "Ofertas SERVIR"
+        ws_main.append([h or "" for h in EXCEL_HEADERS])
+        for col_idx in range(1, len(EXCEL_HEADERS) + 1):
+            cell = ws_main.cell(row=1, column=col_idx)
+            cell.fill = HEADER_FILL
+            cell.font = HEADER_FONT
+            cell.alignment = CENTER
+        ws_main.row_dimensions[1].height = 30
+        ws_main.freeze_panes = "A2"
+        for col_idx, width in enumerate(COLUMN_WIDTHS, start=1):
+            ws_main.column_dimensions[get_column_letter(col_idx)].width = width
+        ws_dup = None
+
+    # ── Filtrar filas nuevas para hoja principal ──────────────────────────────
+    new_main_rows = [
+        r for r in scraped_rows
+        if str(r.get("numero_convocatoria", "")).strip() not in existing_main_nums
+    ]
+
+    for row in new_main_rows:
+        row_num = ws_main.max_row + 1
+        alt     = (row_num % 2 == 0)
+
+        def _put(col, value, fmt=None, align=LEFT, _rn=row_num, _alt=alt):
+            c = ws_main.cell(row=_rn, column=col, value=value)
+            if _alt:
+                c.fill = ROW_FILL_ALT
+            c.alignment = align
+            if fmt:
+                c.number_format = fmt
+            return c
+
+        _put(1,  row.get("titulo",              ""))
+        _put(2,  row.get("entidad",             ""))
+        _put(3,  row.get("ubicacion",           ""))
+        _put(4,  row.get("numero_convocatoria", ""), align=CENTER)
+        _put(5,  _parse_vacantes(row.get("vacantes",      "")))
+        _put(6,  _parse_remuneracion(row.get("remuneracion", "")), CURR_FMT, CENTER)
+        _put(7,  _parse_fecha(row.get("fecha_inicio", "")),        DATE_FMT, CENTER)
+        _put(8,  _parse_fecha(row.get("fecha_fin",    "")),        DATE_FMT, CENTER)
+        _put(9,  row.get("requerimiento",       ""))
+        _put(10, row.get("experiencia",         ""))
+        _put(11, row.get("formacion_academica", ""))
+        _put(12, row.get("especializacion",     ""))
+        _put(13, None)   # columna de marcado — el usuario la llena manualmente
+
+    # ── Hoja Duplicados ───────────────────────────────────────────────────────
+    nuevas_dup = 0
+    if dup_rows:
+        new_dup_rows = [
+            r for r in dup_rows
+            if str(r.get("numero_convocatoria", "")).strip() not in existing_dup_nums
+        ]
+        if new_dup_rows:
+            if ws_dup is None:
+                ws_dup = wb.create_sheet(title="Duplicados")
+                ws_dup.append([h or "" for h in EXCEL_HEADERS])
+                DUP_FILL = PatternFill(
+                    start_color="8B0000", end_color="8B0000", fill_type="solid"
+                )
+                for col_idx in range(1, len(EXCEL_HEADERS) + 1):
+                    cell = ws_dup.cell(row=1, column=col_idx)
+                    cell.fill = DUP_FILL
+                    cell.font = Font(color="FFFFFF", bold=True)
+                    cell.alignment = CENTER
+                ws_dup.row_dimensions[1].height = 30
+                ws_dup.freeze_panes = "A2"
+                for col_idx, width in enumerate(COLUMN_WIDTHS, start=1):
+                    ws_dup.column_dimensions[get_column_letter(col_idx)].width = width
+
+            for row_d in new_dup_rows:
+                row_num_d = ws_dup.max_row + 1
+                alt_d     = (row_num_d % 2 == 0)
+
+                def _put_d(col, value, fmt=None, align=LEFT, _rn=row_num_d, _alt=alt_d):
+                    c = ws_dup.cell(row=_rn, column=col, value=value)
+                    if _alt:
+                        c.fill = ROW_FILL_ALT
+                    c.alignment = align
+                    if fmt:
+                        c.number_format = fmt
+                    return c
+
+                _put_d(1,  row_d.get("titulo",              ""))
+                _put_d(2,  row_d.get("entidad",             ""))
+                _put_d(3,  row_d.get("ubicacion",           ""))
+                _put_d(4,  row_d.get("numero_convocatoria", ""), align=CENTER)
+                _put_d(5,  _parse_vacantes(row_d.get("vacantes",      "")))
+                _put_d(6,  _parse_remuneracion(row_d.get("remuneracion", "")), CURR_FMT, CENTER)
+                _put_d(7,  _parse_fecha(row_d.get("fecha_inicio", "")),        DATE_FMT, CENTER)
+                _put_d(8,  _parse_fecha(row_d.get("fecha_fin",    "")),        DATE_FMT, CENTER)
+                _put_d(9,  row_d.get("requerimiento",       ""))
+                _put_d(10, row_d.get("experiencia",         ""))
+                _put_d(11, row_d.get("formacion_academica", ""))
+                _put_d(12, row_d.get("especializacion",     ""))
+                _put_d(13, None)
+            nuevas_dup = len(new_dup_rows)
+
+    wb.save(output_path)
+    nuevas_main = len(new_main_rows)
+    logger.info(
+        "Excel actualizado: %s — %d nuevas en 'Ofertas SERVIR', %d nuevas en 'Duplicados'",
+        output_path, nuevas_main, nuevas_dup,
+    )
+    return nuevas_main, nuevas_dup
 
 
 def _write_excel(rows: list[dict], output_path: str) -> None:
@@ -649,6 +816,25 @@ def sync_servir_daily(payload: dict[str, Any], browser: BrowserManager) -> dict[
                         detail = _extract_detail_page(page, context, idx)
                         card.update(detail)
                         page.wait_for_timeout(700)
+                        # Verificar que seguimos en la página correcta tras
+                        # la navegación a DEFAULT_URL en _extract_detail_page.
+                        # Si el servidor nos mandó a página 1, el paginador
+                        # mostrará "1" en vez del page_num actual.
+                        try:
+                            lbl_check = _get_page_label_text(page)
+                            if str(current_page_num) not in lbl_check:
+                                logger.warning(
+                                    "Posición de página perdida tras detalle "
+                                    "(esperado %d, etiqueta: '%s'). Renavegando...",
+                                    current_page_num, lbl_check,
+                                )
+                                # Re-navegar hasta current_page_num desde página 1
+                                for _p in range(1, current_page_num):
+                                    _lbl = _get_page_label_text(page)
+                                    _go_to_next_page(page, _lbl)
+                                    page.wait_for_timeout(800)
+                        except Exception as _exc:
+                            logger.debug("Verificación de página tras detalle: %s", _exc)
                 else:
                     for card in cards_data:
                         card.update(_empty_detail())
@@ -796,11 +982,15 @@ def sync_servir_daily(payload: dict[str, Any], browser: BrowserManager) -> dict[
             r.get("titulo","").strip()
         )] > 1
     ]
-    _write_excel_formatted(final_rows, output_path, dup_rows=_dup_rows or None)
+    # Agregar al Excel solo las filas nuevas (numero_convocatoria no presente aún)
+    nuevas_excel, nuevas_dup_excel = _upsert_excel(
+        all_rows, output_path, dup_rows=_dup_rows or None
+    )
 
     result = {
         "output_file":             output_filename,
-        "total_activas_en_excel":  len(final_rows),
+        "nuevas_en_excel":         nuevas_excel,
+        "nuevas_en_duplicados":    nuevas_dup_excel,
         "nuevas_hoy":              nuevas,
         "marcadas_no_interesa":    len(marked_keys),
         "paginas_recorridas":      pages_scraped,
@@ -904,6 +1094,20 @@ def scrape_servir_ofertas(payload: dict[str, Any], browser: BrowserManager) -> d
                         detail = _extract_detail_page(page, context, idx)
                         card.update(detail)
                         page.wait_for_timeout(700)
+                        try:
+                            lbl_check = _get_page_label_text(page)
+                            if str(current_page_num) not in lbl_check:
+                                logger.warning(
+                                    "Posición de página perdida tras detalle "
+                                    "(esperado %d, etiqueta: '%s'). Renavegando...",
+                                    current_page_num, lbl_check,
+                                )
+                                for _p in range(1, current_page_num):
+                                    _lbl = _get_page_label_text(page)
+                                    _go_to_next_page(page, _lbl)
+                                    page.wait_for_timeout(800)
+                        except Exception as _exc:
+                            logger.debug("Verificación de página tras detalle: %s", _exc)
                 else:
                     for card in cards_data:
                         card.update(_empty_detail())

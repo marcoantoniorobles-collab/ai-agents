@@ -11,7 +11,7 @@ task_queue = Queue("tasks", connection=redis_conn)  # cola genérica, sin agente
 # un límite generoso y único para todo — 1 hora alcanza de sobra incluso
 # para el recorrido completo de SERVIR (~20-30 min en la práctica), y no
 # perjudica a las tareas cortas.
-JOB_TIMEOUT_SECONDS = 3600
+JOB_TIMEOUT_SECONDS = -1
 
 
 def enqueue_task(task_id: str, agent_id: str | None = None) -> None:
