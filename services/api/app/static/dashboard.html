@@ -39,7 +39,9 @@
     border-radius: 50%;
     background: var(--ok);
     margin-right: 6px;
+    animation: blink 2s infinite;
   }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
   header .meta { font-size: 12px; color: #cbd5e1; }
   main { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
   section { margin-bottom: 28px; }
@@ -50,6 +52,61 @@
     color: var(--muted);
     margin-bottom: 10px;
   }
+
+  /* ── SERVIR monitor ── */
+  .servir-box {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--navy);
+    border-radius: 8px;
+    padding: 18px 20px;
+    margin-bottom: 28px;
+  }
+  .servir-box h2 {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin: 0 0 14px 0;
+  }
+  .servir-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .s-metric {
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .s-metric .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+  .s-metric .value { font-size: 1.7rem; font-weight: 700; color: var(--navy); line-height: 1; }
+  .s-metric .sub   { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .progress-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .progress-row .pct { font-weight: 700; color: var(--navy); }
+  .progress-row .pages { font-size: 12px; color: var(--muted); }
+  .bar-bg { background: #e5e7eb; border-radius: 99px; height: 10px; overflow: hidden; }
+  .bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--navy), #3b6fcf);
+    border-radius: 99px;
+    transition: width 1s ease;
+    min-width: 3px;
+  }
+  .s-status-row { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .s-tag {
+    font-size: 11px; font-weight: 600; padding: 2px 10px;
+    border-radius: 999px;
+  }
+  .s-tag.running  { background: #dbeafe; color: #1d4ed8; }
+  .s-tag.done     { background: #dcfce7; color: var(--ok); }
+  .s-tag.error    { background: #fee2e2; color: var(--err); }
+  .s-tag.idle     { background: #f3f4f6; color: var(--muted); }
+  .s-tag.waiting  { background: #fef3c7; color: var(--warn); }
+
+  /* ── Agentes ── */
   .grid-agents {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -92,7 +149,6 @@
     cursor: pointer;
   }
   .vnc-toggle-btn:hover { background: var(--navy); color: white; }
-
   .vnc-panel {
     display: none;
     position: fixed;
@@ -115,12 +171,7 @@
     font-weight: 600;
   }
   .vnc-panel-header button {
-    background: none;
-    border: none;
-    color: white;
-    font-size: 18px;
-    cursor: pointer;
-    line-height: 1;
+    background: none; border: none; color: white; font-size: 18px; cursor: pointer; line-height: 1;
   }
   .vnc-panel iframe { flex: 1; width: 100%; border: none; }
   .badge {
@@ -131,8 +182,8 @@
     border-radius: 999px;
     margin-top: 8px;
   }
-  .badge.ONLINE { background: #dcfce7; color: var(--ok); }
-  .badge.BUSY { background: #fef3c7; color: var(--warn); }
+  .badge.ONLINE  { background: #dcfce7; color: var(--ok); }
+  .badge.BUSY    { background: #fef3c7; color: var(--warn); }
   .badge.OFFLINE { background: #fee2e2; color: var(--err); }
   .agent-card .heartbeat { font-size: 12px; color: var(--muted); margin-top: 6px; }
 
@@ -146,31 +197,16 @@
   table th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
   table tr:last-child td { border-bottom: none; }
   .badge.COMPLETED { background: #dcfce7; color: var(--ok); }
-  .badge.RUNNING { background: #dbeafe; color: #1d4ed8; }
+  .badge.RUNNING   { background: #dbeafe; color: #1d4ed8; }
   .badge.QUEUED, .badge.PENDING { background: #f3f4f6; color: var(--muted); }
-  .badge.FAILED { background: #fef3c7; color: var(--warn); }
-  .badge.DEAD { background: #fee2e2; color: var(--err); }
+  .badge.FAILED    { background: #fef3c7; color: var(--warn); }
+  .badge.DEAD      { background: #fee2e2; color: var(--err); }
 
   .error-cell { color: var(--err); font-size: 12px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
   .filters { margin-bottom: 10px; font-size: 13px; }
   .filters select { padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border); }
   .empty { color: var(--muted); font-size: 13px; padding: 16px; text-align: center; }
   footer { text-align: center; font-size: 11px; color: var(--muted); padding: 20px; }
-  .info-box {
-    background: #fffbeb;
-    border: 1px solid #fde68a;
-    border-radius: 8px;
-    padding: 14px 16px;
-    font-size: 13px;
-    color: #78350f;
-    margin-bottom: 20px;
-  }
-  .info-box code {
-    background: #fff;
-    padding: 1px 5px;
-    border-radius: 4px;
-    font-size: 12px;
-  }
 </style>
 </head>
 <body>
@@ -181,18 +217,49 @@
 </header>
 
 <main>
-  <div class="info-box">
-    Este panel es de solo lectura: muestra el estado real de tus agentes y tareas.
-    Para lanzar una tarea nueva, se usa la API: <code>POST /tasks</code> con
-    <code>task_type</code> y <code>agent_id</code> — por ejemplo desde la terminal
-    con <code>curl</code>, o desde un script/timer programado.
+
+  <!-- ══════════════════════════════════════════════════════ SERVIR -->
+  <div class="servir-box">
+    <h2>🏛️ SERVIR — Monitor de Ofertas Laborales</h2>
+
+    <div class="servir-metrics">
+      <div class="s-metric">
+        <div class="label">Ofertas en Base de Datos</div>
+        <div class="value" id="s-db-count">—</div>
+        <div class="sub" id="s-last-seen">última actualización: —</div>
+      </div>
+      <div class="s-metric">
+        <div class="label">Leídas (corrida actual)</div>
+        <div class="value" id="s-scraped">—</div>
+        <div class="sub" id="s-status-sub">Sin actividad reciente</div>
+      </div>
+      <div class="s-metric">
+        <div class="label">Inicio de corrida</div>
+        <div class="value" style="font-size:1rem;line-height:1.5" id="s-started">—</div>
+        <div class="sub" id="s-elapsed"></div>
+      </div>
+    </div>
+
+    <div class="progress-row">
+      <span class="pct" id="s-pct">0%</span>
+      <span class="pages" id="s-pages">— / — páginas</span>
+    </div>
+    <div class="bar-bg">
+      <div class="bar-fill" id="s-bar" style="width:0%"></div>
+    </div>
+    <div class="s-status-row">
+      <span class="s-tag idle" id="s-tag">Sin datos</span>
+      <span id="s-detail" style="font-size:12px;color:var(--muted)"></span>
+    </div>
   </div>
 
+  <!-- ══════════════════════════════════════════════════════ AGENTES -->
   <section>
     <h2>Agentes</h2>
     <div id="agents-grid" class="grid-agents"><div class="empty">Cargando...</div></div>
   </section>
 
+  <!-- ══════════════════════════════════════════════════════ TAREAS -->
   <section>
     <h2>Tareas recientes</h2>
     <div class="filters">
@@ -222,9 +289,10 @@
       </tbody>
     </table>
   </section>
+
 </main>
 
-<footer>Se actualiza cada 4 segundos · datos desde /agents y /tasks</footer>
+<footer>Se actualiza cada 5 segundos · datos desde /agents, /tasks y /servir/stats</footer>
 
 <div class="vnc-panel" id="vnc-panel">
   <div class="vnc-panel-header">
@@ -235,15 +303,16 @@
 </div>
 
 <script>
-const API_BASE = "";  // mismo origen (la API sirve este dashboard)
+const API_BASE = "";
 let agentNameById = {};
 let latestTasks = [];
 
+/* ── Utilidades de tiempo ── */
 function timeAgo(iso) {
   if (!iso) return "—";
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 60) return Math.floor(diff) + "s";
-  if (diff < 3600) return Math.floor(diff / 60) + "m";
+  if (diff < 60)    return Math.floor(diff) + "s";
+  if (diff < 3600)  return Math.floor(diff / 60) + "m";
   if (diff < 86400) return Math.floor(diff / 3600) + "h";
   return Math.floor(diff / 86400) + "d";
 }
@@ -254,62 +323,122 @@ function duration(startIso, endIso) {
   const secs = Math.floor((end - new Date(startIso).getTime()) / 1000);
   if (secs < 60) return secs + "s";
   const mins = Math.floor(secs / 60);
-  const remSecs = secs % 60;
-  if (mins < 60) return mins + "m " + remSecs + "s";
+  if (mins < 60) return mins + "m " + (secs % 60) + "s";
   const hrs = Math.floor(mins / 60);
   return hrs + "h " + (mins % 60) + "m";
 }
 
+function fmtISO(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("es-PE", {
+      day:"2-digit", month:"2-digit", year:"numeric",
+      hour:"2-digit", minute:"2-digit", hour12:false,
+    });
+  } catch { return iso; }
+}
+
+function fmtN(n) {
+  if (n === null || n === undefined) return "—";
+  return Number(n).toLocaleString("es-PE");
+}
+
+/* ══════════════════════ SERVIR ══════════════════════ */
+async function fetchServirStats() {
+  try {
+    const res = await fetch(API_BASE + "/servir/stats");
+    if (!res.ok) {
+      document.getElementById("s-status-sub").textContent = "Endpoint /servir/stats no disponible aún";
+      return;
+    }
+    const data = await res.json();
+    const p = data.progress || {};
+    const dbCount  = data.db_count  ?? null;
+    const lastSeen = data.last_seen;
+
+    document.getElementById("s-db-count").textContent = dbCount !== null ? fmtN(dbCount) : "—";
+    document.getElementById("s-last-seen").textContent = lastSeen
+      ? "última actualización: " + fmtISO(lastSeen)
+      : "sin datos en BD";
+
+    const scraped  = p.offers_scraped ?? null;
+    const cur      = p.current_page   || 0;
+    const tot      = p.total_pages    || 0;
+    const pct      = tot > 0 ? Math.round((cur / tot) * 100) : 0;
+    const status   = p.status || (dbCount > 0 ? "idle" : "waiting");
+
+    document.getElementById("s-scraped").textContent = scraped !== null ? fmtN(scraped) : "—";
+    document.getElementById("s-pct").textContent     = pct + "%";
+    document.getElementById("s-pages").textContent   = tot > 0
+      ? "Página " + fmtN(cur) + " de " + fmtN(tot)
+      : "— / — páginas";
+    document.getElementById("s-bar").style.width = pct + "%";
+
+    const tag = document.getElementById("s-tag");
+    tag.className = "s-tag " + status;
+    const labels = {
+      running: "Scraping en progreso",
+      done:    "Completado",
+      error:   "Error",
+      idle:    "Sin actividad",
+      waiting: "Esperando primera corrida",
+    };
+    tag.textContent = labels[status] || status;
+
+    document.getElementById("s-detail").textContent =
+      p.error ? "Error: " + p.error :
+      status === "running" && scraped !== null ? fmtN(scraped) + " ofertas leídas hasta ahora" : "";
+
+    document.getElementById("s-started").textContent  = fmtISO(p.started_at);
+    document.getElementById("s-elapsed").textContent  =
+      p.started_at && status === "running" ? duration(p.started_at) + " en progreso" : "";
+
+    document.getElementById("s-status-sub").textContent =
+      status === "running" ? "Página " + cur + " de " + tot :
+      status === "done"    ? "Corrida completada · " + fmtN(scraped) + " leídas" :
+      status === "error"   ? "Error en la última corrida" :
+      "Sin actividad reciente";
+
+  } catch (err) {
+    document.getElementById("s-status-sub").textContent = "No disponible · instalar parche en main.py";
+  }
+}
+
+/* ══════════════════════ AGENTES ══════════════════════ */
 function currentTaskHtml(agentId) {
   const running = latestTasks.find(t => t.agent_id === agentId && t.status === "RUNNING");
   if (running) {
-    return `
-      <div class="current-task working">
-        🔵 Trabajando en: ${running.task_type}
-        <div class="sub">desde hace ${duration(running.started_at)}</div>
-      </div>`;
+    return `<div class="current-task working">🔵 Trabajando en: ${running.task_type}
+      <div class="sub">desde hace ${duration(running.started_at)}</div></div>`;
   }
-  const lastForAgent = latestTasks.find(t => t.agent_id === agentId);
-  if (lastForAgent) {
-    return `
-      <div class="current-task idle">
-        ⚪ Inactivo
-        <div class="sub">última tarea: ${lastForAgent.task_type} (${lastForAgent.status.toLowerCase()}, hace ${timeAgo(lastForAgent.updated_at)})</div>
-      </div>`;
+  const last = latestTasks.find(t => t.agent_id === agentId);
+  if (last) {
+    return `<div class="current-task idle">⚪ Inactivo
+      <div class="sub">última tarea: ${last.task_type} (${last.status.toLowerCase()}, hace ${timeAgo(last.updated_at)})</div></div>`;
   }
   return `<div class="current-task idle">⚪ Sin tareas todavía</div>`;
 }
 
 function vncSectionHtml(agent) {
   if (!agent.metadata || !agent.metadata.vnc_enabled) return "";
-  return `
-    <button class="vnc-toggle-btn" onclick="openVncPanel('${agent.id}', '${agent.name}')">
-      👁️ Ver pantalla en vivo
-    </button>
-  `;
+  return `<button class="vnc-toggle-btn" onclick="openVncPanel('${agent.id}','${agent.name}')">👁️ Ver pantalla en vivo</button>`;
 }
 
 function openVncPanel(agentId, agentName) {
-  const panel = document.getElementById("vnc-panel");
-  const frame = document.getElementById("vnc-panel-frame");
-  const title = document.getElementById("vnc-panel-title");
-  const vncUrl = `${window.location.protocol}//${window.location.hostname}:6080/vnc.html?autoconnect=true&resize=remote&reconnect=true`;
-  title.textContent = "Pantalla en vivo — " + agentName;
-  frame.src = vncUrl;
-  panel.classList.add("open");
+  const vncUrl = `${location.protocol}//${location.hostname}:6080/vnc.html?autoconnect=true&resize=remote&reconnect=true`;
+  document.getElementById("vnc-panel-title").textContent = "Pantalla en vivo — " + agentName;
+  document.getElementById("vnc-panel-frame").src = vncUrl;
+  document.getElementById("vnc-panel").classList.add("open");
 }
 
 function closeVncPanel() {
   document.getElementById("vnc-panel").classList.remove("open");
-  document.getElementById("vnc-panel-frame").src = "";  // corta la conexión al cerrar
+  document.getElementById("vnc-panel-frame").src = "";
 }
 
 function renderAgents(agents) {
   const grid = document.getElementById("agents-grid");
-  if (agents.length === 0) {
-    grid.innerHTML = '<div class="empty">No hay agentes registrados</div>';
-    return;
-  }
+  if (!agents.length) { grid.innerHTML = '<div class="empty">No hay agentes registrados</div>'; return; }
   grid.innerHTML = agents.map(a => `
     <div class="agent-card status-${a.status}">
       <div class="top-row">
@@ -322,8 +451,7 @@ function renderAgents(agents) {
       <div style="font-size:11px;color:var(--muted);margin-top:8px;">último heartbeat: hace ${timeAgo(a.last_heartbeat)}</div>
       ${currentTaskHtml(a.id)}
       ${vncSectionHtml(a)}
-    </div>
-  `).join("");
+    </div>`).join("");
 }
 
 async function fetchAgents() {
@@ -338,51 +466,45 @@ async function fetchTasks() {
   const filter = document.getElementById("status-filter").value;
   const url = API_BASE + "/tasks?limit=50" + (filter ? "&status=" + filter : "");
   const res = await fetch(url);
-  return await res.json();
+  return res.json();
 }
 
 function renderTasksTable(tasks) {
   const tbody = document.getElementById("tasks-body");
-  if (tasks.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty">No hay tareas</td></tr>';
-    return;
-  }
+  if (!tasks.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">No hay tareas</td></tr>'; return; }
   tbody.innerHTML = tasks.map(t => {
-    const agentName = t.agent_id ? (agentNameById[t.agent_id] || t.agent_id.slice(0, 8)) : "—";
+    const agentName = t.agent_id ? (agentNameById[t.agent_id] || t.agent_id.slice(0,8)) : "—";
     const dur = t.started_at ? duration(t.started_at, t.completed_at) : "—";
-    const errorCell = t.error_message
-      ? `<span class="error-cell" title="${t.error_message.replace(/"/g, '&quot;')}">${t.error_message}</span>`
+    const errCell = t.error_message
+      ? `<span class="error-cell" title="${t.error_message.replace(/"/g,'&quot;')}">${t.error_message}</span>`
       : "—";
-    return `
-      <tr>
-        <td>${t.task_type}</td>
-        <td>${agentName}</td>
-        <td><span class="badge ${t.status}">${t.status}</span></td>
-        <td>hace ${timeAgo(t.created_at)}</td>
-        <td>${dur}</td>
-        <td>${errorCell}</td>
-      </tr>
-    `;
+    return `<tr>
+      <td>${t.task_type}</td>
+      <td>${agentName}</td>
+      <td><span class="badge ${t.status}">${t.status}</span></td>
+      <td>hace ${timeAgo(t.created_at)}</td>
+      <td>${dur}</td>
+      <td>${errCell}</td>
+    </tr>`;
   }).join("");
 }
 
+/* ══════════════════════ LOOP ══════════════════════ */
 async function refresh() {
   try {
-    const agents = await fetchAgents();
-    latestTasks = await fetchTasks();
+    const [agents, tasks] = await Promise.all([fetchAgents(), fetchTasks()]);
+    latestTasks = tasks;
     renderAgents(agents);
-    renderTasksTable(latestTasks);
-    document.getElementById("last-update").textContent =
-      "actualizado " + new Date().toLocaleTimeString("es-PE");
-  } catch (e) {
-    document.getElementById("last-update").textContent = "error actualizando: " + e.message;
-  }
+    renderTasksTable(tasks);
+  } catch(e) { /* silencioso */ }
+  await fetchServirStats();
+  document.getElementById("last-update").textContent =
+    "actualizado " + new Date().toLocaleTimeString("es-PE");
 }
 
 document.getElementById("status-filter").addEventListener("change", refresh);
 refresh();
-setInterval(refresh, 4000);
+setInterval(refresh, 5000);
 </script>
-
 </body>
 </html>

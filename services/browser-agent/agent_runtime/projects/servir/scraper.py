@@ -2,29 +2,17 @@
 SERVIR Ofertas Laborales scraper.
 Ruta destino: services/browser-agent/agent_runtime/projects/servir/scraper.py
 
-Correcciones y mejoras vs versión anterior
+Correcciones aplicadas vs versión anterior
 ==========================================
-1. _go_to_next_page: reintentos (3), timeouts 60 s / 30 s, espera extra 1 500 ms
+1. _go_to_next_page: 3 reintentos, timeouts 60 s / 30 s, espera extra 1 500 ms
    tras cambio de etiqueta (race condition PrimeFaces).
-2. _parse_remuneracion: extrae float desde "S/. 4,000.00" → 4000.00
-3. _parse_fecha: convierte "DD/MM/YYYY" → datetime.date (Excel entiende fechas reales)
-4. _parse_vacantes: extrae int desde "1"
-5. _write_excel_formatted / _write_excel: escriben tipos nativos (int, float, date)
-   con formatos de celda correctos; Excel ya no distorsiona los valores.
-6. Carga inicial con wait_until="networkidle" (más estable que "load").
-7. Log preciso cuando se detiene antes de terminar todas las páginas.
-8. NUEVO _extract_detail_page: al hacer clic en "¡Ver más!" extrae el N° de Aviso
-   MÁS los campos: Requerimiento, Experiencia, Formación Académica, Especialización.
-   Se detiene en "Conocimientos" (todo lo que viene después no se captura).
-   Activar con get_detail=True.
-   WARNING: ~3-4 horas extra para 3 200 ofertas (~1 clic/seg aprox).
-
-IMPORTANTE sobre los links de convocatoria
-==========================================
-SERVIR usa JSF puro (PrimeFaces). El botón "¡Ver más!" hace un POST de formulario
-y lleva a detalle_ofertas_laborales.xhtml SIN parámetros en la URL. No existe una
-URL estable por oferta. El único identificador visible es el "N° de Aviso"
-(p. ej. 802776) que sólo aparece en la página de detalle.
+2. _parse_remuneracion: "S/. 4,000.00" → float 4000.0
+3. _parse_fecha: "DD/MM/YYYY" → datetime.date (Excel escribe fecha real, no texto)
+4. _parse_vacantes: "1" → int
+5. _write_excel_formatted / _write_excel: tipos nativos con formatos de celda correctos.
+6. NUEVO _extract_detail_page: extrae Requerimiento, Experiencia, Formación Académica,
+   Especialización desde la página de detalle. Se activa con payload get_detail=True.
+   Se detiene antes de "Conocimientos". WARNING: ~3-4 horas extra para 3 200 ofertas.
 
 Mapa de columnas Excel
 ======================
@@ -34,18 +22,25 @@ Col  3 → (espaciador)
 Col  4 → (espaciador)
 Col  5 → Ubicación
 Col  6 → Número de Convocatoria
-Col  7 → Vacantes          (int)
-Col  8 → Remuneración      (float, formato #,##0.00)
-Col  9 → Fecha Inicio      (date, formato DD/MM/YYYY)
-Col 10 → Fecha Fin         (date, formato DD/MM/YYYY)
-Col 11 → Requerimiento     (texto largo — sólo si get_detail=True)
-Col 12 → Experiencia       (texto largo — sólo si get_detail=True)
-Col 13 → Formación Académica (texto largo — sólo si get_detail=True)
-Col 14 → Especialización   (texto largo — sólo si get_detail=True)
-Col 15 → No me interesa    (columna de marcado manual)
+Col  7 → Vacantes            (int)
+Col  8 → Remuneración        (float, #,##0.00)
+Col  9 → Fecha Inicio        (date, DD/MM/YYYY)
+Col 10 → Fecha Fin           (date, DD/MM/YYYY)
+Col 11 → Requerimiento       (texto — sólo si get_detail=True)
+Col 12 → Experiencia         (texto — sólo si get_detail=True)
+Col 13 → Formación Académica (texto — sólo si get_detail=True)
+Col 14 → Especialización     (texto — sólo si get_detail=True)
+Col 15 → No me interesa      (marcado manual)
+
+IMPORTANTE sobre los links de convocatoria
+==========================================
+SERVIR usa JSF puro (PrimeFaces). "¡Ver más!" hace un POST sin parámetros en la URL.
+No existe URL estable por oferta. El N° de Aviso sólo aparece en la página de detalle.
 """
 
+import json
 import logging
+import os
 import re
 from datetime import date, datetime, timezone
 from typing import Any
@@ -62,16 +57,58 @@ from ...models import ServirOferta
 logger = logging.getLogger("agent_runtime.scrapers.servir")
 
 # ---------------------------------------------------------------------------
+# Progreso en Redis (para el dashboard de monitoreo)
+# ---------------------------------------------------------------------------
+_REDIS_PROGRESS_KEY = "servir:progress"
+_REDIS_TTL_SECONDS  = 86_400   # 24 h
+
+
+def _get_redis():
+    """Devuelve un cliente Redis sin fallar si Redis no está disponible."""
+    try:
+        import redis as _redis_lib
+        url = os.environ.get("REDIS_URL", "redis://redis:6379")
+        return _redis_lib.from_url(url, socket_connect_timeout=2)
+    except Exception:
+        return None
+
+
+def _report_progress(
+    status: str,
+    current_page: int,
+    total_pages: int,
+    offers_scraped: int,
+    started_at: str,
+    error: str | None = None,
+) -> None:
+    """Escribe el progreso del scraping en Redis para que el dashboard lo lea."""
+    payload = {
+        "status":         status,          # "running" | "done" | "error"
+        "current_page":   current_page,
+        "total_pages":    total_pages,
+        "offers_scraped": offers_scraped,
+        "started_at":     started_at,
+        "updated_at":     datetime.now(timezone.utc).isoformat(),
+        "error":          error,
+    }
+    try:
+        r = _get_redis()
+        if r:
+            r.set(_REDIS_PROGRESS_KEY, json.dumps(payload), ex=_REDIS_TTL_SECONDS)
+    except Exception as exc:
+        logger.debug("No se pudo actualizar progreso en Redis: %s", exc)
+
+# ---------------------------------------------------------------------------
 # Constantes
 # ---------------------------------------------------------------------------
-DEFAULT_URL = (
-    "https://app.servir.gob.pe/DifusionOfertasExterno/faces/consultas/"
-    "ofertas_laborales.xhtml"
-)
+DEFAULT_URL          = "https://app.servir.gob.pe/DifusionOfertasExterno/faces/consultas/ofertas_laborales.xhtml"
 CARDS_SELECTOR       = "form#frmLstOfertsLabo .cuadro-vacantes"
 PAGE_LABEL_SELECTOR  = "label.btn-paginator-cnt"
 NEXT_BUTTON_SELECTOR = "button:has-text('Sig.')"
 VER_MAS_SELECTOR     = "a:has-text('¡Ver más!'), button:has-text('¡Ver más!')"
+
+MARK_COLUMN_HEADER = "No me interesa"
+MARK_VALUES        = {"X", "SI", "SÍ", "YES", "1", "S"}
 
 EXCEL_HEADERS = [
     "Título de Convocatoria",    # col  1
@@ -88,7 +125,7 @@ EXCEL_HEADERS = [
     "Experiencia",               # col 12  → texto (detalle)
     "Formación Académica",       # col 13  → texto (detalle)
     "Especialización",           # col 14  → texto (detalle)
-    "No me interesa",            # col 15  → marcado manual
+    MARK_COLUMN_HEADER,          # col 15  → marcado manual
 ]
 
 # ---------------------------------------------------------------------------
@@ -127,23 +164,23 @@ EXTRACT_CARDS_JS = """
 """
 
 # ---------------------------------------------------------------------------
-# JS — extrae campos de la página de DETALLE (después de "¡Ver más!")
+# JS — extrae campos de la página de DETALLE
+# Captura: aviso_num, requerimiento, experiencia, formacion_academica,
+#          especializacion. Se detiene al encontrar "Conocimientos".
 # ---------------------------------------------------------------------------
 EXTRACT_DETAIL_JS = r"""
 () => {
   const STOP_KEY = /conocimientos/i;
   const TARGET_KEYS = {
-    requerimiento:      /^requerimiento/i,
-    experiencia:        /^experiencia/i,
-    formacion_academica:/^formaci[oó]n\s+acad[eé]mica/i,
-    especializacion:    /^especializaci[oó]n/i,
+    requerimiento:       /^requerimiento/i,
+    experiencia:         /^experiencia/i,
+    formacion_academica: /^formaci[oó]n\s+acad[eé]mica/i,
+    especializacion:     /^especializaci[oó]n/i,
   };
 
   function nodeText(el) {
     return (el.innerText || el.textContent || '').trim();
   }
-
-  const allEls = Array.from(document.body.querySelectorAll('*'));
 
   const result = {
     aviso_num:           '',
@@ -157,22 +194,20 @@ EXTRACT_DETAIL_JS = r"""
   const avisoMatch = bodyText.match(/N[°º]\s*(\d{4,8})/);
   if (avisoMatch) result.aviso_num = avisoMatch[1];
 
+  const allEls  = Array.from(document.body.querySelectorAll('*'));
   let currentKey = null;
   let stop = false;
 
   for (const el of allEls) {
     if (stop) break;
-
     const ownText = nodeText(el);
     if (!ownText) continue;
-
     if (STOP_KEY.test(ownText)) { stop = true; break; }
 
     let matchedKey = null;
     for (const [key, pattern] of Object.entries(TARGET_KEYS)) {
       if (pattern.test(ownText.replace(/:\s*$/, ''))) {
-        matchedKey = key;
-        break;
+        matchedKey = key; break;
       }
     }
 
@@ -181,18 +216,13 @@ EXTRACT_DETAIL_JS = r"""
       const colonIdx = ownText.indexOf(':');
       if (colonIdx !== -1) {
         const inline = ownText.slice(colonIdx + 1).trim();
-        if (inline) {
-          result[currentKey] = inline;
-          currentKey = null;
-        }
+        if (inline) { result[currentKey] = inline; currentKey = null; }
       }
       continue;
     }
 
-    if (currentKey && ownText.length > 1) {
-      if (!result[currentKey]) {
-        result[currentKey] = ownText;
-      }
+    if (currentKey && ownText.length > 1 && !result[currentKey]) {
+      result[currentKey] = ownText;
       currentKey = null;
     }
   }
@@ -202,7 +232,6 @@ EXTRACT_DETAIL_JS = r"""
       result[k] = result[k].replace(/\s{2,}/g, ' ').trim();
     }
   }
-
   return result;
 }
 """
@@ -212,6 +241,7 @@ EXTRACT_DETAIL_JS = r"""
 # ---------------------------------------------------------------------------
 
 def _parse_remuneracion(raw: str) -> float | None:
+    """"S/. 4,000.00" → 4000.0"""
     if not raw:
         return None
     cleaned = re.sub(r"[Ss]/\.\s*", "", raw).strip().replace(",", "")
@@ -223,6 +253,7 @@ def _parse_remuneracion(raw: str) -> float | None:
 
 
 def _parse_fecha(raw: str) -> date | None:
+    """"DD/MM/YYYY" → datetime.date"""
     if not raw:
         return None
     try:
@@ -233,6 +264,7 @@ def _parse_fecha(raw: str) -> date | None:
 
 
 def _parse_vacantes(raw: str) -> int | None:
+    """"1" → 1"""
     if not raw:
         return None
     try:
@@ -240,6 +272,13 @@ def _parse_vacantes(raw: str) -> int | None:
     except ValueError:
         logger.warning("No se pudo parsear vacantes: %r", raw)
         return None
+
+
+def _empty_detail() -> dict:
+    return {
+        "aviso_num": "", "requerimiento": "", "experiencia": "",
+        "formacion_academica": "", "especializacion": "",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -254,16 +293,31 @@ def _get_page_label_text(page) -> str:
 
 
 def _parse_total_pages(label_text: str) -> int:
-    m = re.search(r"de\s+(\d+)", label_text, re.IGNORECASE)
-    return int(m.group(1)) if m else 1
+    match = re.search(r"P[aá]gina\s+\d+\s+de\s+(\d+)", label_text)
+    if not match:
+        raise ValueError(f"No se pudo interpretar el texto de paginación: '{label_text}'")
+    return int(match.group(1))
 
 
-def _humanized_pause(page, min_ms: int = 800, max_ms: int = 1800) -> None:
+def _humanized_pause(page, page_num: int = 0) -> None:
     import random
-    page.wait_for_timeout(random.randint(min_ms, max_ms))
+    if page_num and page_num % 20 == 0:
+        delay = random.uniform(8, 15)
+    else:
+        delay = random.uniform(2.5, 5.5)
+    page.wait_for_timeout(int(delay * 1000))
 
 
-def _go_to_next_page(page) -> bool:
+def _go_to_next_page(page, current_label: str) -> bool:
+    """
+    Hace clic en 'Sig.' y espera a que PrimeFaces actualice la página.
+    Correcciones:
+    - 3 reintentos
+    - timeout POST: 60 000 ms (antes 30 000)
+    - timeout label: 30 000 ms (antes 15 000)
+    - espera extra 1 500 ms tras cambio de etiqueta (race condition PrimeFaces)
+    Devuelve True si tuvo éxito, False si falló tras 3 intentos.
+    """
     next_btn = page.locator(NEXT_BUTTON_SELECTOR).first
     try:
         if next_btn.is_disabled(timeout=3_000):
@@ -271,26 +325,23 @@ def _go_to_next_page(page) -> bool:
     except Exception:
         return False
 
-    label_before = _get_page_label_text(page)
-
     for attempt in range(1, 4):
         try:
             with page.expect_response(
-                lambda r: "ofertas_laborales.xhtml" in r.url
-                          and r.request.method == "POST",
+                lambda r: "ofertas_laborales.xhtml" in r.url and r.request.method == "POST",
                 timeout=60_000,
             ):
                 next_btn.click()
 
             page.wait_for_function(
-                f"""
-                () => {{
-                    const el = document.querySelector('{PAGE_LABEL_SELECTOR}');
-                    return el && el.innerText.trim() !== {repr(label_before)};
-                }}
-                """,
+                """(oldLabel) => {
+                    const el = document.querySelector('label.btn-paginator-cnt');
+                    return el && el.innerText.trim() !== oldLabel;
+                }""",
+                arg=current_label,
                 timeout=30_000,
             )
+            # Espera extra: PrimeFaces cambia el label ANTES de renderizar tarjetas
             page.wait_for_timeout(1_500)
             return True
 
@@ -307,15 +358,16 @@ def _go_to_next_page(page) -> bool:
 # Extracción de página de detalle
 # ---------------------------------------------------------------------------
 
-def _extract_detail_page(page, card_index: int) -> dict:
-    empty = {
-        "aviso_num": "", "requerimiento": "", "experiencia": "",
-        "formacion_academica": "", "especializacion": "",
-    }
+def _extract_detail_page(page, context, card_index: int) -> dict:
+    """
+    Hace clic en '¡Ver más!' de la tarjeta `card_index` (base-0).
+    Extrae aviso_num, requerimiento, experiencia, formacion_academica,
+    especializacion. Vuelve al listado. Devuelve dict con valores vacíos si falla.
+    """
     try:
         cards = page.locator(CARDS_SELECTOR).all()
         if card_index >= len(cards):
-            return empty
+            return _empty_detail()
 
         ver_mas = cards[card_index].locator(VER_MAS_SELECTOR).first
         with page.expect_response(
@@ -330,7 +382,7 @@ def _extract_detail_page(page, card_index: int) -> dict:
 
     except Exception as exc:
         logger.warning("Error al abrir detalle (tarjeta %d): %s", card_index, exc)
-        detail = empty
+        detail = _empty_detail()
 
     try:
         page.go_back(wait_until="networkidle", timeout=30_000)
@@ -345,296 +397,514 @@ def _extract_detail_page(page, card_index: int) -> dict:
 # Estilos Excel
 # ---------------------------------------------------------------------------
 
-DATE_FMT      = "DD/MM/YYYY"
-CURRENCY_FMT  = "#,##0.00"
-HEADER_FILL   = PatternFill("solid", fgColor="1F4E79")
-HEADER_FONT   = Font(bold=True, color="FFFFFF", size=11)
-ALT_FILL      = PatternFill("solid", fgColor="D6E4F7")
-CENTER_ALIGN  = Alignment(horizontal="center", vertical="center", wrap_text=True)
-LEFT_ALIGN    = Alignment(horizontal="left",   vertical="center", wrap_text=True)
+DATE_FMT     = "DD/MM/YYYY"
+CURR_FMT     = "#,##0.00"
+HEADER_FILL  = PatternFill(start_color="1F3864", end_color="1F3864", fill_type="solid")
+HEADER_FONT  = Font(color="FFFFFF", bold=True)
+ROW_FILL_ALT = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+CENTER       = Alignment(horizontal="center", vertical="center", wrap_text=True)
+LEFT         = Alignment(horizontal="left",   vertical="center", wrap_text=True)
 
-_COL_WIDTHS = {
-    1:  40,
-    2:  35,
-    3:   5,
-    4:   5,
-    5:  30,
-    6:  22,
-    7:  10,
-    8:  15,
-    9:  18,
-    10: 18,
-    11: 50,
-    12: 50,
-    13: 50,
-    14: 50,
-    15: 20,
-}
+COLUMN_WIDTHS = [45, 38, 4, 4, 26, 24, 10, 16, 16, 16, 50, 50, 50, 50, 16]
 
 
-def _write_excel_formatted(path: str, rows: list[dict]) -> None:
+def _write_excel_formatted(rows: list[dict], output_path: str) -> None:
+    """Escribe Excel con tipos correctos: int, float, date y texto."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Ofertas SERVIR"
 
-    for col_idx, header in enumerate(EXCEL_HEADERS, start=1):
-        cell = ws.cell(row=1, column=col_idx, value=header or "")
-        cell.fill      = HEADER_FILL
-        cell.font      = HEADER_FONT
-        cell.alignment = CENTER_ALIGN
+    # Cabeceras
+    ws.append([h or "" for h in EXCEL_HEADERS])
+    for col_idx in range(1, len(EXCEL_HEADERS) + 1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+        cell.alignment = CENTER
+    ws.row_dimensions[1].height = 30
+    ws.freeze_panes = "A2"
 
+    # Datos
     for row_num, row in enumerate(rows, start=2):
         alt = (row_num % 2 == 0)
 
-        def _put(col: int, value, fmt: str | None = None, align=LEFT_ALIGN):
+        def _put(col: int, value, fmt: str | None = None, align=LEFT):
             c = ws.cell(row=row_num, column=col, value=value)
             if alt:
-                c.fill = ALT_FILL
+                c.fill = ROW_FILL_ALT
             c.alignment = align
             if fmt:
                 c.number_format = fmt
             return c
 
-        _put(1,  row.get("titulo",               ""))
-        _put(2,  row.get("entidad",              ""))
-        _put(3,  "")
-        _put(4,  "")
-        _put(5,  row.get("ubicacion",            ""))
-        _put(6,  row.get("numero_convocatoria",  ""), align=CENTER_ALIGN)
-        _put(7,  _parse_vacantes(row.get("vacantes", "")))
-        _put(8,  _parse_remuneracion(row.get("remuneracion", "")), CURRENCY_FMT, CENTER_ALIGN)
-        _put(9,  _parse_fecha(row.get("fecha_inicio", "")),        DATE_FMT,     CENTER_ALIGN)
-        _put(10, _parse_fecha(row.get("fecha_fin",    "")),        DATE_FMT,     CENTER_ALIGN)
+        _put(1,  row.get("titulo",              ""))
+        _put(2,  row.get("entidad",             ""))
+        _put(3,  None)
+        _put(4,  None)
+        _put(5,  row.get("ubicacion",           ""))
+        _put(6,  row.get("numero_convocatoria", ""), align=CENTER)
+        _put(7,  _parse_vacantes(row.get("vacantes",      "")))
+        _put(8,  _parse_remuneracion(row.get("remuneracion", "")), CURR_FMT, CENTER)
+        _put(9,  _parse_fecha(row.get("fecha_inicio", "")),        DATE_FMT, CENTER)
+        _put(10, _parse_fecha(row.get("fecha_fin",    "")),        DATE_FMT, CENTER)
         _put(11, row.get("requerimiento",       ""))
         _put(12, row.get("experiencia",         ""))
         _put(13, row.get("formacion_academica", ""))
         _put(14, row.get("especializacion",     ""))
-        _put(15, "")
+        _put(15, None)
 
-    for col_idx, width in _COL_WIDTHS.items():
+    # Anchos
+    for col_idx, width in enumerate(COLUMN_WIDTHS, start=1):
         ws.column_dimensions[get_column_letter(col_idx)].width = width
 
-    ws.freeze_panes = "A2"
-    wb.save(path)
-    logger.info("Excel guardado en %s (%d filas)", path, len(rows))
+    wb.save(output_path)
+    logger.info("Excel guardado: %s (%d filas)", output_path, len(rows))
 
 
-def _write_excel(path: str, rows: list[dict]) -> None:
+def _write_excel(rows: list[dict], output_path: str) -> None:
+    """Versión minimal sin estilos, con tipos de dato correctos."""
     wb = Workbook()
     ws = wb.active
-
-    ws.append([
-        "titulo", "entidad", "", "", "ubicacion",
-        "numero_convocatoria", "vacantes", "remuneracion",
-        "fecha_inicio", "fecha_fin",
-        "requerimiento", "experiencia", "formacion_academica",
-        "especializacion", "no_me_interesa",
-    ])
+    ws.title = "Ofertas SERVIR"
+    ws.append([h or "" for h in EXCEL_HEADERS])
 
     for row in rows:
         ws.append([
-            row.get("titulo",               ""),
-            row.get("entidad",              ""),
-            "", "",
-            row.get("ubicacion",            ""),
-            row.get("numero_convocatoria",  ""),
+            row.get("titulo",              ""),
+            row.get("entidad",             ""),
+            None, None,
+            row.get("ubicacion",           ""),
+            row.get("numero_convocatoria", ""),
             _parse_vacantes(row.get("vacantes",      "")),
             _parse_remuneracion(row.get("remuneracion", "")),
             _parse_fecha(row.get("fecha_inicio", "")),
             _parse_fecha(row.get("fecha_fin",    "")),
-            row.get("requerimiento",        ""),
-            row.get("experiencia",          ""),
-            row.get("formacion_academica",  ""),
-            row.get("especializacion",      ""),
-            "",
+            row.get("requerimiento",       ""),
+            row.get("experiencia",         ""),
+            row.get("formacion_academica", ""),
+            row.get("especializacion",     ""),
+            None,
         ])
 
     for row_cells in ws.iter_rows(min_row=2, min_col=8, max_col=10):
-        row_cells[0].number_format = CURRENCY_FMT
+        row_cells[0].number_format = CURR_FMT
         row_cells[1].number_format = DATE_FMT
         row_cells[2].number_format = DATE_FMT
 
-    wb.save(path)
+    wb.save(output_path)
 
 
 # ---------------------------------------------------------------------------
-# Lectura de marcados ("No me interesa" en col 15)
+# Lectura de marcados ("No me interesa" en col 15 → índice 14)
 # ---------------------------------------------------------------------------
 
-def _read_marked_keys(path: str) -> set[tuple[str, str, str]]:
-    if not path or not __import__("os").path.exists(path):
+def _read_marked_keys(output_path: str) -> set[tuple[str, str, str]]:
+    if not os.path.exists(output_path):
         return set()
     try:
-        wb = load_workbook(path, read_only=True, data_only=True)
+        wb = load_workbook(output_path, data_only=True)
         ws = wb.active
-        marked: set[tuple[str, str, str]] = set()
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if row and len(row) >= 15 and row[14]:
-                titulo   = str(row[0]  or "").strip()
-                entidad  = str(row[1]  or "").strip()
-                num_conv = str(row[5]  or "").strip()
-                marked.add((num_conv, entidad, titulo))
-        wb.close()
-        return marked
+        header_row = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
     except Exception as exc:
-        logger.warning("No se pudo leer marcados de %s: %s", path, exc)
+        logger.warning("No se pudo leer el Excel previo: %s", exc)
         return set()
 
-
-# ---------------------------------------------------------------------------
-# Función principal de scraping
-# ---------------------------------------------------------------------------
-
-def scrape_servir_ofertas(
-    url: str = DEFAULT_URL,
-    get_detail: bool = False,
-) -> list[dict]:
-    """
-    Recorre todas las páginas de SERVIR y devuelve lista de dicts.
-
-    get_detail=True → hace clic en cada "¡Ver más!" para extraer
-    Requerimiento, Experiencia, Formación Académica, Especialización.
-    Tarda ~3-4 horas extra para 3 200 ofertas.
-    """
-    browser_mgr = BrowserManager.get_instance()
-    page = browser_mgr.new_page()
-    all_rows: list[dict] = []
-
     try:
-        logger.info("Cargando página inicial: %s", url)
-        page.goto(url, wait_until="networkidle", timeout=60_000)
-        page.wait_for_selector(CARDS_SELECTOR, timeout=30_000)
+        idx_titulo = header_row.index("Título de Convocatoria")
+        idx_num    = header_row.index("Número de Convocatoria")
+        idx_ent    = header_row.index("Entidad")
+        idx_mark   = header_row.index(MARK_COLUMN_HEADER)
+    except ValueError:
+        logger.warning("El Excel previo no tiene las columnas esperadas.")
+        return set()
 
-        label_text  = _get_page_label_text(page)
-        total_pages = _parse_total_pages(label_text)
-        logger.info("Total de páginas detectadas: %d", total_pages)
-
-        current_page = 1
-
-        while True:
-            logger.info("Extrayendo página %d / %d ...", current_page, total_pages)
-            cards_data: list[dict] = page.evaluate(EXTRACT_CARDS_JS)
-
-            if get_detail:
-                for idx, card in enumerate(cards_data):
-                    logger.debug("  Detalle tarjeta %d/%d ...", idx + 1, len(cards_data))
-                    detail = _extract_detail_page(page, idx)
-                    card.update(detail)
-                    _humanized_pause(page, 500, 1_000)
-            else:
-                for card in cards_data:
-                    card.setdefault("aviso_num",           "")
-                    card.setdefault("requerimiento",       "")
-                    card.setdefault("experiencia",         "")
-                    card.setdefault("formacion_academica", "")
-                    card.setdefault("especializacion",     "")
-
-            all_rows.extend(cards_data)
-            _humanized_pause(page)
-
-            if current_page >= total_pages:
-                logger.info(
-                    "Scraping completado: %d páginas, %d ofertas.",
-                    current_page, len(all_rows),
-                )
-                break
-
-            success = _go_to_next_page(page)
-            if not success:
-                logger.warning(
-                    "Detenido en página %d de %d (%d ofertas extraídas).",
-                    current_page, total_pages, len(all_rows),
-                )
-                break
-
-            current_page += 1
-
-    finally:
-        page.close()
-
-    return all_rows
+    marked: set[tuple[str, str, str]] = set()
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if idx_mark >= len(row):
+            continue
+        mark_value = row[idx_mark]
+        if mark_value and str(mark_value).strip().upper() in MARK_VALUES:
+            titulo  = str(row[idx_titulo] or "").strip()
+            numero  = str(row[idx_num]    or "").strip()
+            entidad = str(row[idx_ent]    or "").strip()
+            if numero and entidad and titulo:
+                marked.add((numero, entidad, titulo))
+    return marked
 
 
 # ---------------------------------------------------------------------------
-# Sincronización diaria con BD + Excel
+# sync_servir_daily — sincronización diaria con BD + Excel
 # ---------------------------------------------------------------------------
 
-def sync_servir_daily(
-    excel_path: str | None = None,
-    url: str = DEFAULT_URL,
-    get_detail: bool = False,
-    use_formatted_excel: bool = True,
-) -> dict[str, Any]:
+def sync_servir_daily(payload: dict[str, Any], browser: BrowserManager) -> dict[str, Any]:
     """
-    1. Scrapea todas las ofertas de SERVIR.
-    2. Inserta / actualiza en servir_ofertas de Postgres.
-    3. Genera Excel en excel_path (si se indica).
+    Scrapea SERVIR, actualiza BD y genera Excel.
 
-    get_detail=True activa extracción de campos del detalle (~3-4 h extra).
+    Parámetros del payload
+    ----------------------
+    url          : str   URL del listado (default DEFAULT_URL)
+    session_label: str   Etiqueta de sesión del navegador (default "servir")
+    max_pages    : int   Límite de páginas (default None = todas)
+    filename     : str   Nombre del archivo Excel de salida
+    get_detail   : bool  Si True, hace clic en "¡Ver más!" por cada tarjeta
+                         para extraer Requerimiento, Experiencia, Formación
+                         Académica, Especialización. ~3-4 h extra. Default False.
     """
-    logger.info("=== sync_servir_daily START (get_detail=%s) ===", get_detail)
-    rows = scrape_servir_ofertas(url=url, get_detail=get_detail)
-    logger.info("Ofertas scrapeadas: %d", len(rows))
+    url           = payload.get("url",           DEFAULT_URL)
+    session_label = payload.get("session_label", "servir")
+    max_pages     = payload.get("max_pages")
+    get_detail    = bool(payload.get("get_detail", False))
 
-    inserted = 0
-    updated  = 0
+    output_filename = payload.get("filename", "Ofertas_SERVIR_activas.xlsx")
+    output_path     = f"/app/output/{output_filename}"
 
-    with SessionLocal() as db:
-        for row in rows:
-            num_conv = row.get("numero_convocatoria", "").strip()
-            entidad  = row.get("entidad",             "").strip()
-            titulo   = row.get("titulo",              "").strip()
+    run_time = datetime.now(timezone.utc)
 
-            if not num_conv or not entidad:
-                continue
-
-            existing = db.execute(
+    # Procesar marcados "No me interesa" del Excel previo
+    marked_keys = _read_marked_keys(output_path)
+    db = SessionLocal()
+    try:
+        for numero, entidad, titulo in marked_keys:
+            oferta = db.scalar(
                 select(ServirOferta).where(
-                    ServirOferta.numero_convocatoria == num_conv,
+                    ServirOferta.numero_convocatoria == numero,
                     ServirOferta.entidad             == entidad,
                     ServirOferta.titulo              == titulo,
                 )
-            ).scalar_one_or_none()
-
-            now = datetime.now(timezone.utc)
-
-            if existing:
-                existing.ubicacion    = row.get("ubicacion",    "")
-                existing.vacantes     = row.get("vacantes",     "")
-                existing.remuneracion = row.get("remuneracion", "")
-                existing.fecha_inicio = row.get("fecha_inicio", "")
-                existing.fecha_fin    = row.get("fecha_fin",    "")
-                existing.last_seen_at = now
-                updated += 1
-            else:
-                db.add(ServirOferta(
-                    numero_convocatoria = num_conv,
-                    entidad             = entidad,
-                    titulo              = titulo,
-                    ubicacion           = row.get("ubicacion",    ""),
-                    vacantes            = row.get("vacantes",     ""),
-                    remuneracion        = row.get("remuneracion", ""),
-                    fecha_inicio        = row.get("fecha_inicio", ""),
-                    fecha_fin           = row.get("fecha_fin",    ""),
-                    first_seen_at       = now,
-                    last_seen_at        = now,
-                ))
-                inserted += 1
-
+            )
+            if oferta and not oferta.removed_by_user:
+                oferta.removed_by_user    = True
+                oferta.removed_by_user_at = run_time
         db.commit()
+    finally:
+        db.close()
 
-    logger.info("BD → nuevas: %d, actualizadas: %d", inserted, updated)
+    # Scraping
+    context = browser.get_context(session_label)
+    page    = context.new_page()
 
-    if excel_path:
-        if use_formatted_excel:
-            _write_excel_formatted(excel_path, rows)
+    all_rows:     list[dict] = []
+    failed_pages: list[int]  = []
+    pages_scraped  = 0
+    stopped_early  = False
+    error_detail   = None
+
+    try:
+        page.goto(url, wait_until="load", timeout=60_000)
+        page.wait_for_timeout(4_000)
+
+        label_text  = _get_page_label_text(page)
+        total_pages = _parse_total_pages(label_text)
+        target_pages = min(max_pages, total_pages) if max_pages else total_pages
+        logger.info(
+            "SERVIR (sync diario): %d páginas totales, recorriendo %d (get_detail=%s)",
+            total_pages, target_pages, get_detail,
+        )
+        started_at_iso = run_time.isoformat()
+        _report_progress("running", 0, target_pages, 0, started_at_iso)
+
+        current_page_num = 1
+        while current_page_num <= target_pages:
+            try:
+                cards_data: list[dict] = page.evaluate(EXTRACT_CARDS_JS)
+
+                if get_detail:
+                    for idx, card in enumerate(cards_data):
+                        logger.debug(
+                            "  Detalle pág %d, tarjeta %d/%d ...",
+                            current_page_num, idx + 1, len(cards_data),
+                        )
+                        detail = _extract_detail_page(page, context, idx)
+                        card.update(detail)
+                        page.wait_for_timeout(700)
+                else:
+                    for card in cards_data:
+                        card.update(_empty_detail())
+
+                all_rows.extend(cards_data)
+                pages_scraped += 1
+            except Exception as exc:
+                logger.warning("Fallo extrayendo página %d: %s", current_page_num, exc)
+                failed_pages.append(current_page_num)
+
+            # Actualizar progreso en Redis CADA página
+            _report_progress("running", current_page_num, target_pages, len(all_rows), started_at_iso)
+
+            if pages_scraped % 20 == 0 or current_page_num == target_pages:
+                logger.info(
+                    "SERVIR (sync diario): progreso %d/%d páginas, %d ofertas",
+                    current_page_num, target_pages, len(all_rows),
+                )
+
+            if current_page_num >= target_pages:
+                break
+
+            try:
+                label_text = _get_page_label_text(page)
+                ok = _go_to_next_page(page, label_text)
+                if not ok:
+                    logger.error("Botón Sig. deshabilitado en página %d — cortando.", current_page_num)
+                    stopped_early = True
+                    break
+            except Exception as exc:
+                logger.error("Fallo avanzando desde página %d: %s", current_page_num, exc)
+                stopped_early = True
+                error_detail  = str(exc)
+                break
+
+            current_page_num += 1
+            _humanized_pause(page, current_page_num)
+
+    except Exception as exc:
+        logger.error("Fallo irrecuperable en sync_servir_daily: %s", exc)
+        stopped_early = True
+        error_detail  = str(exc)
+    finally:
+        page.close()
+
+    recorrido_completo = not stopped_early and not failed_pages
+
+    # Persistir en BD
+    db = SessionLocal()
+    nuevas = 0
+    try:
+        for row in all_rows:
+            numero  = row.get("numero_convocatoria", "").strip()
+            entidad = row.get("entidad",             "").strip()
+            titulo  = row.get("titulo",              "").strip()
+            if not numero or not entidad or not titulo:
+                continue
+            try:
+                oferta = db.scalar(
+                    select(ServirOferta).where(
+                        ServirOferta.numero_convocatoria == numero,
+                        ServirOferta.entidad             == entidad,
+                        ServirOferta.titulo              == titulo,
+                    )
+                )
+                if oferta:
+                    oferta.ubicacion    = row.get("ubicacion",    "")
+                    oferta.vacantes     = row.get("vacantes",     "")
+                    oferta.remuneracion = row.get("remuneracion", "")
+                    oferta.fecha_inicio = row.get("fecha_inicio", "")
+                    oferta.fecha_fin    = row.get("fecha_fin",    "")
+                    oferta.last_seen_at = run_time
+                else:
+                    db.add(ServirOferta(
+                        numero_convocatoria = numero,
+                        entidad             = entidad,
+                        titulo              = titulo,
+                        ubicacion           = row.get("ubicacion",    ""),
+                        vacantes            = row.get("vacantes",     ""),
+                        remuneracion        = row.get("remuneracion", ""),
+                        fecha_inicio        = row.get("fecha_inicio", ""),
+                        fecha_fin           = row.get("fecha_fin",    ""),
+                        first_seen_at       = run_time,
+                        last_seen_at        = run_time,
+                        removed_by_user     = False,
+                    ))
+                    nuevas += 1
+                db.commit()
+            except Exception as exc:
+                db.rollback()
+                logger.warning("Fallo guardando oferta '%s': %s", titulo, exc)
+
+        if recorrido_completo:
+            activas = db.scalars(
+                select(ServirOferta).where(
+                    ServirOferta.last_seen_at == run_time,
+                    ServirOferta.removed_by_user.is_(False),
+                )
+            ).all()
+            vencidas = db.scalars(
+                select(ServirOferta).where(ServirOferta.last_seen_at < run_time)
+            ).all()
+            for v in vencidas:
+                db.delete(v)
+            db.commit()
         else:
-            _write_excel(excel_path, rows)
+            activas = db.scalars(
+                select(ServirOferta).where(ServirOferta.removed_by_user.is_(False))
+            ).all()
 
-    logger.info("=== sync_servir_daily END ===")
-    return {
-        "total_scraped": len(rows),
-        "inserted":      inserted,
-        "updated":       updated,
-        "excel_path":    excel_path,
+        final_rows = [
+            {
+                "titulo":              o.titulo,
+                "entidad":             o.entidad,
+                "ubicacion":           o.ubicacion,
+                "numero_convocatoria": o.numero_convocatoria,
+                "vacantes":            o.vacantes,
+                "remuneracion":        o.remuneracion,
+                "fecha_inicio":        o.fecha_inicio,
+                "fecha_fin":           o.fecha_fin,
+                # campos de detalle vacíos en BD (sólo se guardan en Excel)
+                "requerimiento":       row.get("requerimiento",       ""),
+                "experiencia":         row.get("experiencia",         ""),
+                "formacion_academica": row.get("formacion_academica", ""),
+                "especializacion":     row.get("especializacion",     ""),
+            }
+            for o, row in _match_rows(activas, all_rows)
+        ]
+    finally:
+        db.close()
+
+    _write_excel_formatted(final_rows, output_path)
+
+    result = {
+        "output_file":             output_filename,
+        "total_activas_en_excel":  len(final_rows),
+        "nuevas_hoy":              nuevas,
+        "marcadas_no_interesa":    len(marked_keys),
+        "paginas_recorridas":      pages_scraped,
+        "paginas_fallidas":        failed_pages,
+        "recorrido_completo":      recorrido_completo,
+        "detalle_error":           error_detail,
     }
+    _report_progress(
+        status         = "done" if recorrido_completo else "error",
+        current_page   = pages_scraped,
+        total_pages    = pages_scraped,   # evita mostrar "incompleto" si terminó OK
+        offers_scraped = len(final_rows),
+        started_at     = run_time.isoformat(),
+        error          = error_detail,
+    )
+    logger.info("SERVIR (sync diario): finalizado — %s", result)
+    return result
+
+
+def _match_rows(activas, all_rows: list[dict]) -> list[tuple]:
+    """
+    Empareja cada oferta activa de la BD con su fila scrapeada
+    (para recuperar los campos de detalle que no se guardan en BD).
+    """
+    index = {
+        (r.get("numero_convocatoria", "").strip(),
+         r.get("entidad",             "").strip(),
+         r.get("titulo",              "").strip()): r
+        for r in all_rows
+    }
+    result = []
+    for o in activas:
+        key = (o.numero_convocatoria.strip(), o.entidad.strip(), o.titulo.strip())
+        row = index.get(key, {})
+        result.append((o, row))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# scrape_servir_ofertas — extracción simple (sin sync de BD)
+# ---------------------------------------------------------------------------
+
+def scrape_servir_ofertas(payload: dict[str, Any], browser: BrowserManager) -> dict[str, Any]:
+    """
+    Extrae ofertas y genera Excel. No hace sync con la BD.
+
+    Parámetros del payload
+    ----------------------
+    url          : str
+    session_label: str   (default "servir")
+    max_pages    : int   (default None = todas)
+    start_page   : int   (default 1)
+    filename     : str
+    get_detail   : bool  (default False)
+    """
+    url           = payload.get("url",           DEFAULT_URL)
+    session_label = payload.get("session_label", "servir")
+    max_pages     = payload.get("max_pages")
+    start_page    = payload.get("start_page", 1)
+    get_detail    = bool(payload.get("get_detail", False))
+
+    today    = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    filename = payload.get("filename", f"Ofertas_Laborales_SERVIR_{today}.xlsx")
+    output_path = f"/app/output/{filename}"
+
+    context = browser.get_context(session_label)
+    page    = context.new_page()
+
+    all_rows:     list[dict] = []
+    failed_pages: list[int]  = []
+    pages_scraped  = 0
+    stopped_early  = False
+    error_detail   = None
+
+    try:
+        page.goto(url, wait_until="load", timeout=60_000)
+        page.wait_for_timeout(4_000)
+
+        label_text  = _get_page_label_text(page)
+        total_pages = _parse_total_pages(label_text)
+        target_pages = min(max_pages, total_pages) if max_pages else total_pages
+        logger.info(
+            "SERVIR: %d páginas totales, recorriendo %d desde página %d (get_detail=%s)",
+            total_pages, target_pages, start_page, get_detail,
+        )
+
+        # Avanzar hasta start_page
+        current_page_num = 1
+        while current_page_num < start_page:
+            label_text = _get_page_label_text(page)
+            _go_to_next_page(page, label_text)
+            current_page_num += 1
+            _humanized_pause(page, current_page_num)
+
+        while current_page_num <= target_pages:
+            try:
+                cards_data: list[dict] = page.evaluate(EXTRACT_CARDS_JS)
+
+                if get_detail:
+                    for idx, card in enumerate(cards_data):
+                        detail = _extract_detail_page(page, context, idx)
+                        card.update(detail)
+                        page.wait_for_timeout(700)
+                else:
+                    for card in cards_data:
+                        card.update(_empty_detail())
+
+                all_rows.extend(cards_data)
+                pages_scraped += 1
+            except Exception as exc:
+                logger.warning("Fallo extrayendo página %d: %s", current_page_num, exc)
+                failed_pages.append(current_page_num)
+
+            if current_page_num >= target_pages:
+                break
+
+            try:
+                label_text = _get_page_label_text(page)
+                ok = _go_to_next_page(page, label_text)
+                if not ok:
+                    logger.error("Botón Sig. deshabilitado en página %d.", current_page_num)
+                    stopped_early = True
+                    error_detail  = "Botón Sig. deshabilitado"
+                    break
+            except Exception as exc:
+                logger.error(
+                    "Fallo avanzando desde página %d: %s — guardando lo recolectado.",
+                    current_page_num, exc,
+                )
+                stopped_early = True
+                error_detail  = str(exc)
+                break
+
+            current_page_num += 1
+            _humanized_pause(page, current_page_num)
+
+    except Exception as exc:
+        logger.error("Fallo irrecuperable en scrape_servir_ofertas: %s", exc)
+        stopped_early = True
+        error_detail  = str(exc)
+    finally:
+        page.close()
+
+    _write_excel(all_rows, output_path)
+
+    result = {
+        "output_file":           filename,
+        "total_ofertas":         len(all_rows),
+        "paginas_recorridas":    pages_scraped,
+        "paginas_fallidas":      failed_pages,
+        "recorrido_completo":    not stopped_early and not failed_pages,
+        "detalle_error":         error_detail,
+    }
+    logger.info("SERVIR: recorrido finalizado — %s", result)
+    return result

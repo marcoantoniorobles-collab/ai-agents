@@ -61,7 +61,7 @@ services:
     ports:
       - "${TAILSCALE_IP}:6080:6080"
     volumes:
-      - /mnt/hgfs/AI-Agents/salidas/agente-1:/app/output
+      - /home/aiadmin/ai-output/agente-1:/app/output
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,7 +89,7 @@ services:
       ENABLE_VNC: "false"
     shm_size: "1gb"
     volumes:
-      - /mnt/hgfs/AI-Agents/salidas/agente-2:/app/output
+      - /home/aiadmin/ai-output/agente-2:/app/output
     depends_on:
       postgres:
         condition: service_healthy
@@ -117,7 +117,7 @@ services:
       ENABLE_VNC: "false"
     shm_size: "1gb"
     volumes:
-      - /mnt/hgfs/AI-Agents/salidas/agente-3:/app/output
+      - /home/aiadmin/ai-output/agente-3:/app/output
     depends_on:
       postgres:
         condition: service_healthy
